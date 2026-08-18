@@ -28,6 +28,12 @@ jobs:
             done < <(tail -n 40 <<<"$output" | tac)
           fi
           exit "$status"
+      - name: Configure Release
+        run: cmake --preset release
+      - name: Build Release
+        run: cmake --build --preset release -j2
+      - name: Verify staged install
+        run: cmake --install build/release --prefix "$RUNNER_TEMP/devmgr-install"
 
   sanitizers:
     runs-on: ubuntu-24.04

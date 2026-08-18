@@ -1,0 +1,26 @@
+[Unit]
+Description=Linux Embedded Device Manager
+Documentation=https://github.com/xuan511/linux-device-manager
+After=local-fs.target
+
+[Service]
+Type=simple
+User=devmgr
+Group=devmgr
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/devmgrd.conf
+RuntimeDirectory=devmgrd
+RuntimeDirectoryMode=0750
+ExecStart=/usr/local/bin/devmgrd --device ${DEVICE_PATH} --socket ${SOCKET_PATH}
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

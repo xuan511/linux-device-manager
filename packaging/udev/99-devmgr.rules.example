@@ -1,0 +1,7 @@
+# EXAMPLE ONLY. VVVV and PPPP are deliberately invalid placeholders.
+# Obtain the real USB-UART identifiers with:
+#   udevadm info --attribute-walk --name=/dev/ttyUSB0
+# Then copy this file to /etc/udev/rules.d/99-devmgr.rules and replace both.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="VVVV", ATTRS{idProduct}=="PPPP", \
+    SYMLINK+="devmgr0", GROUP="dialout", MODE="0660"
+

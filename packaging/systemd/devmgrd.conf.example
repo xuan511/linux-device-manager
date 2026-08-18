@@ -1,0 +1,5 @@
+# Copy to /etc/devmgrd.conf and adapt to the stable symlink created by your
+# reviewed udev rule. EnvironmentFile values are expanded by systemd ExecStart.
+DEVICE_PATH=/dev/devmgr0
+SOCKET_PATH=/run/devmgrd/devmgrd.sock
+

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(linux_device_manager VERSION 0.1.0 LANGUAGES C)
 
+include(GNUInstallDirs)
+
 option(DEVMGR_BUILD_TESTS "Build tests" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -79,7 +81,14 @@ if(UNIX AND NOT APPLE)
 
     add_executable(devctl apps/devctl/main.c)
     target_link_libraries(devctl PRIVATE devmgr_ipc devmgr_upgrade)
+
+    install(TARGETS devmgrd devctl device-sim
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+
+install(DIRECTORY include/devmgr DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES LICENSE README.md README.zh-CN.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR} OPTIONAL)
 
 if(DEVMGR_BUILD_TESTS)
     enable_testing()
