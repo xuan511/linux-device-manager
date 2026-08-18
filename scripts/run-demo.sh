@@ -24,7 +24,12 @@ firmware_path="${work_dir}/firmware.bin"
 dd if=/dev/zero of="${firmware_path}" bs=1024 count=8 status=none
 
 echo "[1/8] Starting device simulator"
-"${binary_dir}/device-sim" >"${work_dir}/sim.out" 2>"${work_dir}/sim.err" &
+sim_command=("${binary_dir}/device-sim")
+if [[ ${DEVMGR_VALGRIND:-0} == 1 ]]; then
+    sim_command=(valgrind --quiet --leak-check=full --show-leak-kinds=definite
+                 --errors-for-leak-kinds=definite --error-exitcode=99 "${sim_command[@]}")
+fi
+"${sim_command[@]}" >"${work_dir}/sim.out" 2>"${work_dir}/sim.err" &
 sim_pid=$!
 for _ in $(seq 1 100); do
     grep -q '^PTY: ' "${work_dir}/sim.out" && break
@@ -36,7 +41,12 @@ pty_path=$(sed -n 's/^PTY: //p' "${work_dir}/sim.out" | head -n1)
 echo "PTY: ${pty_path}"
 
 echo "[2/8] Starting devmgrd"
-"${binary_dir}/devmgrd" --device "${pty_path}" --socket "${socket_path}" \
+daemon_command=("${binary_dir}/devmgrd")
+if [[ ${DEVMGR_VALGRIND:-0} == 1 ]]; then
+    daemon_command=(valgrind --quiet --leak-check=full --show-leak-kinds=definite
+                    --errors-for-leak-kinds=definite --error-exitcode=99 "${daemon_command[@]}")
+fi
+"${daemon_command[@]}" --device "${pty_path}" --socket "${socket_path}" \
     >"${work_dir}/daemon.out" 2>"${work_dir}/daemon.err" &
 daemon_pid=$!
 ready=0

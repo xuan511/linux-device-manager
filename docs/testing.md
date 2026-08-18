@@ -17,7 +17,14 @@ Run everything with `ctest --preset debug --output-on-failure`. Select with
 run the same suite, so process-level paths are checked as well as unit tests.
 Valgrind and coverage commands are documented and scripted in their phases.
 
+`scripts/run-sanitizers.sh` configures the combined ASan+UBSan preset and runs
+the full suite with leak detection and halt-on-first-error. `scripts/run-valgrind.sh`
+runs every host test plus the real three-process demo with definite leaks and
+invalid accesses treated as failures. `scripts/run-coverage.sh` runs the full
+coverage build and emits lcov HTML when those optional tools are installed.
+GitHub Actions runs normal Ubuntu 24.04, ASan+UBSan Ubuntu 24.04, and Valgrind
+Ubuntu 22.04 jobs independently.
+
 Tests intentionally verify happy paths, malformed boundaries, corruption,
 timeouts, duplicate data, and recovery. They do not claim physical UART/STM32
 timing or flash power-loss behavior.
-
