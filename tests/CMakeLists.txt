@@ -21,10 +21,25 @@ add_executable(test_upgrade test_upgrade.c)
 target_link_libraries(test_upgrade PRIVATE devmgr_upgrade)
 add_test(NAME unit.upgrade COMMAND test_upgrade)
 
+add_executable(test_parser_stress test_parser_stress.c)
+target_link_libraries(test_parser_stress PRIVATE devmgr_protocol)
+add_test(NAME stress.parser COMMAND test_parser_stress)
+set_tests_properties(stress.parser PROPERTIES LABELS "stress;fuzz-smoke" TIMEOUT 30)
+
 
 if(UNIX AND NOT APPLE)
     add_executable(test_transport test_transport.c)
     target_compile_definitions(test_transport PRIVATE _POSIX_C_SOURCE=200809L)
     target_link_libraries(test_transport PRIVATE devmgr_transport)
     add_test(NAME unit.transport COMMAND test_transport)
+
+    add_test(NAME integration.demo
+             COMMAND ${CMAKE_COMMAND} -E env DEVMGR_BINARY_DIR=$<TARGET_FILE_DIR:devmgrd>
+                     bash ${PROJECT_SOURCE_DIR}/scripts/run-demo.sh)
+    set_tests_properties(integration.demo PROPERTIES LABELS integration TIMEOUT 45)
+
+    add_test(NAME integration.fault-recovery
+             COMMAND ${CMAKE_COMMAND} -E env DEVMGR_BINARY_DIR=$<TARGET_FILE_DIR:devmgrd>
+                     bash ${PROJECT_SOURCE_DIR}/scripts/demo-fault-recovery.sh)
+    set_tests_properties(integration.fault-recovery PROPERTIES LABELS integration TIMEOUT 60)
 endif()
