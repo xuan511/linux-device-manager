@@ -57,3 +57,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y valgrind
       - name: Run Valgrind suite
         run: ./scripts/run-valgrind.sh
+
+  stm32-reference:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Arm GNU toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Cross-compile Cortex-M3 reference objects
+        run: ./scripts/build-stm32-reference.sh
