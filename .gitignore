@@ -10,4 +10,5 @@ coverage-html/
 *.pid
 *.sock
 *.tmp
-
+/.settings/
+/.vscode/

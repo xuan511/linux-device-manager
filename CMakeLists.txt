@@ -42,6 +42,23 @@ target_sources(devmgr_protocol PRIVATE
 target_include_directories(devmgr_protocol PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_protocol PUBLIC devmgr_common)
 
+if(UNIX AND NOT APPLE)
+    add_library(devmgr_transport STATIC)
+    target_sources(devmgr_transport PRIVATE
+        src/transport/serial.c
+        src/transport/pty.c)
+    target_include_directories(devmgr_transport PUBLIC ${PROJECT_SOURCE_DIR}/include)
+    target_compile_definitions(devmgr_transport PRIVATE _DEFAULT_SOURCE)
+    target_link_libraries(devmgr_transport PUBLIC devmgr_common)
+
+    add_executable(device-sim
+        apps/device-sim/main.c
+        simulator/device/simulator.c)
+    target_include_directories(device-sim PRIVATE simulator/device)
+    target_compile_definitions(device-sim PRIVATE _POSIX_C_SOURCE=200809L)
+    target_link_libraries(device-sim PRIVATE devmgr_protocol devmgr_transport)
+endif()
+
 if(DEVMGR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
