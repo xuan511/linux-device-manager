@@ -35,8 +35,14 @@ target_sources(devmgr_common PRIVATE
     src/common/ring_buffer.c)
 target_include_directories(devmgr_common PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
+add_library(devmgr_protocol STATIC)
+target_sources(devmgr_protocol PRIVATE
+    src/protocol/frame.c
+    src/protocol/parser.c)
+target_include_directories(devmgr_protocol PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(devmgr_protocol PUBLIC devmgr_common)
+
 if(DEVMGR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
-

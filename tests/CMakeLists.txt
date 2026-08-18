@@ -5,3 +5,7 @@ add_executable(test_common
 target_link_libraries(test_common PRIVATE devmgr_common)
 add_test(NAME unit.common COMMAND test_common)
 
+add_executable(test_protocol test_protocol.c)
+target_link_libraries(test_protocol PRIVATE devmgr_protocol)
+add_test(NAME unit.protocol COMMAND test_protocol)
+

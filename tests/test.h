@@ -22,4 +22,12 @@ int test_ring_partial(void);
         }                                                                                       \
     } while (0)
 
+#define TEST_RUN(name)                                                                          \
+    do {                                                                                        \
+        int result = (name)();                                                                  \
+        (void)printf("[%s] %s\n", result == 0 ? "PASS" : "FAIL", #name);                       \
+        failed += result != 0;                                                                  \
+    } while (0)
+
+
 #endif
