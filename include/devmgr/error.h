@@ -1,0 +1,24 @@
+#ifndef DEVMGR_ERROR_H
+#define DEVMGR_ERROR_H
+
+enum devmgr_status {
+    DEVMGR_OK = 0,
+    DEVMGR_ERROR_INVALID = -1,
+    DEVMGR_ERROR_NOMEM = -2,
+    DEVMGR_ERROR_OVERFLOW = -3,
+    DEVMGR_ERROR_UNDERFLOW = -4,
+    DEVMGR_ERROR_CRC = -5,
+    DEVMGR_ERROR_PROTOCOL = -6,
+    DEVMGR_ERROR_TIMEOUT = -7,
+    DEVMGR_ERROR_DISCONNECTED = -8,
+    DEVMGR_ERROR_IO = -9,
+    DEVMGR_ERROR_STATE = -10,
+    DEVMGR_ERROR_BUSY = -11,
+    DEVMGR_ERROR_NOT_FOUND = -12,
+    DEVMGR_ERROR_LIMIT = -13
+};
+
+const char *devmgr_status_string(int status);
+
+#endif
+

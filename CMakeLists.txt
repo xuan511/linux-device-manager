@@ -1,0 +1,42 @@
+cmake_minimum_required(VERSION 3.20)
+project(linux_device_manager VERSION 0.1.0 LANGUAGES C)
+
+option(DEVMGR_BUILD_TESTS "Build tests" ON)
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_COVERAGE "Enable gcov coverage" OFF)
+
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow
+                        -Wstrict-prototypes -Wmissing-prototypes)
+    if(ENABLE_ASAN)
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    endif()
+    if(ENABLE_UBSAN)
+        add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=undefined)
+    endif()
+    if(ENABLE_COVERAGE)
+        add_compile_options(--coverage -O0 -g)
+        add_link_options(--coverage)
+    endif()
+endif()
+
+add_library(devmgr_common STATIC)
+target_sources(devmgr_common PRIVATE
+    src/common/crc32.c
+    src/common/error.c
+    src/common/log.c
+    src/common/ring_buffer.c)
+target_include_directories(devmgr_common PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+if(DEVMGR_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+

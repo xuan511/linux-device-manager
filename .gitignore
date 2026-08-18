@@ -1,0 +1,13 @@
+/build/
+/.cache/
+compile_commands.json
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage-html/
+*.log
+*.pid
+*.sock
+*.tmp
+
