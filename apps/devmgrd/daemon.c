@@ -54,6 +54,9 @@ struct daemon_context {
     size_t transport_output_offset;
     const char *socket_path;
     bool running;
+    uint8_t latest_telemetry[16];
+    size_t latest_telemetry_length;
+    uint64_t telemetry_frames;
 };
 
 static uint64_t monotonic_ns(void)
@@ -144,6 +147,15 @@ static int retransmit_frame(const struct devmgr_frame *frame, void *opaque)
 static int on_device_frame(const struct devmgr_frame *frame, void *opaque)
 {
     struct daemon_context *context = opaque;
+    if (frame->type == DEVMGR_MSG_TELEMETRY && frame->sequence == 0U) {
+        if (frame->payload_length == sizeof(context->latest_telemetry)) {
+            memcpy(context->latest_telemetry, frame->payload, frame->payload_length);
+            context->latest_telemetry_length = frame->payload_length;
+            ++context->telemetry_frames;
+        }
+        return DEVMGR_OK;
+    }
+    uint8_t request_type = context->session.pending.frame.type;
     int result = devmgr_session_accept_response(&context->session, frame);
     if (result != DEVMGR_OK) {
         devmgr_log_write(DEVMGR_LOG_WARN, "daemon", "ignored sequence %u: %s", frame->sequence,
@@ -160,7 +172,13 @@ static int on_device_frame(const struct devmgr_frame *frame, void *opaque)
     if (context->active_client >= 0) {
         size_t index = (size_t)context->active_client;
         context->active_client = -1;
-        return queue_client_response(context, index, frame->type, DEVMGR_OK, frame->payload,
+        if (frame->type != DEVMGR_MSG_NACK && frame->type != DEVMGR_MSG_ERROR) {
+            if (request_type == DEVMGR_MSG_START_TELEMETRY)
+                (void)devmgr_session_transition(&context->session, DEVMGR_SESSION_START_STREAM);
+            else if (request_type == DEVMGR_MSG_STOP_TELEMETRY)
+                (void)devmgr_session_transition(&context->session, DEVMGR_SESSION_STOP_STREAM);
+        }
+        return queue_client_response(context, index, request_type, DEVMGR_OK, frame->payload,
                                      frame->payload_length);
     }
     return DEVMGR_OK;
@@ -213,6 +231,22 @@ static int start_request(struct daemon_context *context, size_t client_index,
     struct devmgr_frame frame;
     struct devmgr_retry_policy policy = {.timeout_ms = 1000U, .retry_interval_ms = 500U,
                                          .max_retries = 2U};
+    if (ipc_request->command == DEVMGR_IPC_GET_TELEMETRY) {
+        if (context->latest_telemetry_length == 0U)
+            return queue_client_response(context, client_index, ipc_request->command,
+                                         DEVMGR_ERROR_NOT_FOUND, NULL, 0U);
+        return queue_client_response(context, client_index, ipc_request->command, DEVMGR_OK,
+                                     context->latest_telemetry,
+                                     context->latest_telemetry_length);
+    }
+    if (ipc_request->command == DEVMGR_MSG_START_TELEMETRY &&
+        context->session.state != DEVMGR_DEVICE_READY)
+        return queue_client_response(context, client_index, ipc_request->command,
+                                     DEVMGR_ERROR_STATE, NULL, 0U);
+    if (ipc_request->command == DEVMGR_MSG_STOP_TELEMETRY &&
+        context->session.state != DEVMGR_DEVICE_STREAMING)
+        return queue_client_response(context, client_index, ipc_request->command,
+                                     DEVMGR_ERROR_STATE, NULL, 0U);
     if (context->session.state != DEVMGR_DEVICE_READY &&
         context->session.state != DEVMGR_DEVICE_STREAMING) {
         return queue_client_response(context, client_index, ipc_request->command,
@@ -452,4 +486,3 @@ int devmgr_daemon_run(const struct devmgr_daemon_config *config)
     cleanup_context(&context);
     return result;
 }
-

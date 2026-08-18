@@ -9,6 +9,7 @@
 #define DEVMGR_IPC_REQUEST_HEADER_SIZE 8U
 #define DEVMGR_IPC_RESPONSE_HEADER_SIZE 12U
 #define DEVMGR_IPC_MAX_PAYLOAD 4096U
+#define DEVMGR_IPC_GET_TELEMETRY UINT8_C(0xF0)
 
 struct devmgr_ipc_request {
     uint8_t command;
@@ -33,4 +34,3 @@ int devmgr_ipc_decode_response(const uint8_t *data, size_t length,
                                struct devmgr_ipc_response *response);
 
 #endif
-

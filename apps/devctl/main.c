@@ -56,11 +56,15 @@ static int connect_socket(const char *path)
     return fd;
 }
 
-static int exchange(const char *path, uint8_t command, struct devmgr_ipc_response *response)
+static int exchange(const char *path, uint8_t command, const uint8_t *payload,
+                    uint32_t payload_length, struct devmgr_ipc_response *response)
 {
-    struct devmgr_ipc_request request = {.command = command};
+    struct devmgr_ipc_request request = {.command = command, .payload_length = payload_length};
     uint8_t buffer[DEVMGR_IPC_RESPONSE_HEADER_SIZE + DEVMGR_IPC_MAX_PAYLOAD];
     size_t length = 0U;
+    if (payload_length > DEVMGR_IPC_MAX_PAYLOAD || (payload == NULL && payload_length != 0U))
+        return DEVMGR_ERROR_INVALID;
+    if (payload_length != 0U) memcpy(request.payload, payload, payload_length);
     int fd = connect_socket(path);
     if (fd < 0) return DEVMGR_ERROR_IO;
     int result = devmgr_ipc_encode_request(&request, buffer, sizeof(buffer), &length);
@@ -119,12 +123,22 @@ static void print_response(uint8_t command, const struct devmgr_ipc_response *re
         (void)printf("RX frames: %u\nTX frames: %u\nErrors: %u\n",
                      devmgr_get_le32(response->payload), devmgr_get_le32(response->payload + 4U),
                      devmgr_get_le32(response->payload + 8U));
+    } else if (command == DEVMGR_MSG_START_TELEMETRY && response->payload_length == 4U) {
+        (void)printf("Telemetry started: %u ms\n", devmgr_get_le32(response->payload));
+    } else if (command == DEVMGR_MSG_STOP_TELEMETRY) {
+        (void)printf("Telemetry stopped\n");
+    } else if (command == DEVMGR_IPC_GET_TELEMETRY && response->payload_length == 16U) {
+        (void)printf("Temperature: %.3f C\nVoltage: %u mV\nUptime: %u s\nSample: %u\n",
+                     (double)(int32_t)devmgr_get_le32(response->payload) / 1000.0,
+                     devmgr_get_le32(response->payload + 4U),
+                     devmgr_get_le32(response->payload + 8U),
+                     devmgr_get_le32(response->payload + 12U));
     }
 }
 
 static void usage(const char *program)
 {
-    (void)fprintf(stderr, "Usage: %s [--socket PATH] ping|info|health|stats\n", program);
+    (void)fprintf(stderr, "Usage: %s [--socket PATH] ping|info|health|stats|telemetry-start [ms]|telemetry-stop|telemetry\n", program);
 }
 
 int main(int argc, char **argv)
@@ -141,17 +155,32 @@ int main(int argc, char **argv)
         if (option == 's') socket_path = optarg;
         else { usage(argv[0]); return option == 'h' ? 0 : 2; }
     }
-    if (optind + 1 != argc) { usage(argv[0]); return 2; }
+    if (optind >= argc || optind + 2 < argc) { usage(argv[0]); return 2; }
     uint8_t command;
+    uint8_t request_payload[4];
+    uint32_t request_payload_length = 0U;
     if (strcmp(argv[optind], "ping") == 0) command = DEVMGR_MSG_PING;
     else if (strcmp(argv[optind], "info") == 0) command = DEVMGR_MSG_GET_INFO;
     else if (strcmp(argv[optind], "health") == 0) command = DEVMGR_MSG_GET_HEALTH;
     else if (strcmp(argv[optind], "stats") == 0) command = DEVMGR_MSG_GET_STATS;
+    else if (strcmp(argv[optind], "telemetry-start") == 0) {
+        char *end = NULL;
+        unsigned long interval = optind + 1 < argc ? strtoul(argv[optind + 1], &end, 10) : 1000UL;
+        if ((end != NULL && *end != '\0') || interval < 100UL || interval > 60000UL) {
+            (void)fprintf(stderr, "interval must be 100..60000 ms\n"); return 2;
+        }
+        command = DEVMGR_MSG_START_TELEMETRY;
+        devmgr_put_le32(request_payload, (uint32_t)interval);
+        request_payload_length = 4U;
+    }
+    else if (strcmp(argv[optind], "telemetry-stop") == 0) command = DEVMGR_MSG_STOP_TELEMETRY;
+    else if (strcmp(argv[optind], "telemetry") == 0) command = DEVMGR_IPC_GET_TELEMETRY;
     else { usage(argv[0]); return 2; }
+    if (optind + 1 < argc && command != DEVMGR_MSG_START_TELEMETRY) { usage(argv[0]); return 2; }
     struct timespec before, after;
     struct devmgr_ipc_response response;
     (void)clock_gettime(CLOCK_MONOTONIC, &before);
-    int result = exchange(socket_path, command, &response);
+    int result = exchange(socket_path, command, request_payload, request_payload_length, &response);
     (void)clock_gettime(CLOCK_MONOTONIC, &after);
     if (result != DEVMGR_OK) {
         (void)fprintf(stderr, "IPC failed: %s\n", devmgr_status_string(result)); return 1;
@@ -162,4 +191,3 @@ int main(int argc, char **argv)
     print_response(command, &response, elapsed);
     return response.status == DEVMGR_OK ? 0 : 1;
 }
-

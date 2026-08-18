@@ -12,6 +12,15 @@
 
 static volatile sig_atomic_t stop_requested;
 
+static uint64_t simulator_now_ns(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+        return 0U;
+    }
+    return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
+}
+
 void simulator_request_stop(void)
 {
     stop_requested = 1;
@@ -94,6 +103,30 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         devmgr_put_le32(response.payload + 8U, (uint32_t)simulator->errors);
         response.payload_length = 12U;
         break;
+    case DEVMGR_MSG_START_TELEMETRY:
+        if (request->payload_length != 4U) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 3U);
+            response.payload_length = 2U;
+            break;
+        }
+        simulator->telemetry_interval_ms = devmgr_get_le32(request->payload);
+        if (simulator->telemetry_interval_ms < 100U || simulator->telemetry_interval_ms > 60000U) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 3U);
+            response.payload_length = 2U;
+            break;
+        }
+        simulator->telemetry_enabled = true;
+        simulator->next_telemetry_ns = simulator_now_ns() +
+                                       (uint64_t)simulator->telemetry_interval_ms * UINT64_C(1000000);
+        devmgr_put_le32(response.payload, simulator->telemetry_interval_ms);
+        response.payload_length = 4U;
+        break;
+    case DEVMGR_MSG_STOP_TELEMETRY:
+        simulator->telemetry_enabled = false;
+        response.payload_length = 0U;
+        break;
     default:
         response.type = DEVMGR_MSG_NACK;
         devmgr_put_le16(response.payload, 1U);
@@ -101,6 +134,27 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         break;
     }
     return write_frame(simulator, &response);
+}
+
+static int emit_telemetry(struct simulator_state *simulator, uint64_t now_ns)
+{
+    struct devmgr_frame frame = {.type = DEVMGR_MSG_TELEMETRY,
+                                 .flags = DEVMGR_FRAME_RESPONSE,
+                                 .sequence = 0U,
+                                 .payload_length = 16U};
+    uint64_t started_ns = (uint64_t)simulator->started_at.tv_sec * UINT64_C(1000000000) +
+                          (uint64_t)simulator->started_at.tv_nsec;
+    uint32_t uptime_seconds = (uint32_t)((now_ns - started_ns) / UINT64_C(1000000000));
+    int32_t wave = (int32_t)(simulator->telemetry_samples % 21U) - 10;
+    simulator->temperature_millic = 36500 + wave * 25;
+    simulator->voltage_mv = 3300U - (simulator->telemetry_samples % 7U);
+    devmgr_put_le32(frame.payload, (uint32_t)simulator->temperature_millic);
+    devmgr_put_le32(frame.payload + 4U, simulator->voltage_mv);
+    devmgr_put_le32(frame.payload + 8U, uptime_seconds);
+    devmgr_put_le32(frame.payload + 12U, simulator->telemetry_samples++);
+    simulator->next_telemetry_ns = now_ns +
+                                   (uint64_t)simulator->telemetry_interval_ms * UINT64_C(1000000);
+    return write_frame(simulator, &frame);
 }
 
 int simulator_init(struct simulator_state *simulator, int master_fd)
@@ -127,16 +181,17 @@ int simulator_run(struct simulator_state *simulator)
     }
     while (simulator->running && !stop_requested) {
         struct pollfd descriptor = {.fd = simulator->master_fd, .events = POLLIN};
-        int ready = poll(&descriptor, 1, 1000);
+        int ready = poll(&descriptor, 1, simulator->telemetry_enabled ? 100 : 1000);
         if (ready < 0 && errno == EINTR) {
             continue;
         }
         if (ready < 0) {
             return DEVMGR_ERROR_IO;
         }
-        if (ready == 0) {
-            continue;
-        }
+        uint64_t now_ns = simulator_now_ns();
+        if (simulator->telemetry_enabled && now_ns >= simulator->next_telemetry_ns &&
+            emit_telemetry(simulator, now_ns) != DEVMGR_OK) return DEVMGR_ERROR_IO;
+        if (ready == 0) continue;
         if ((descriptor.revents & (POLLERR | POLLNVAL)) != 0) {
             return DEVMGR_ERROR_IO;
         }
@@ -159,4 +214,3 @@ int simulator_run(struct simulator_state *simulator)
     }
     return DEVMGR_OK;
 }
-

@@ -60,3 +60,8 @@ their implementing phases. NACK/ERROR begins with a little-endian u16 error code
 invalid-command=1, invalid-state=2, invalid-payload=3, CRC=4, offset=5,
 storage=6, verify=7, busy=8, internal=9.
 
+Telemetry frames use type `0x83`, response flag, and sequence zero because they
+are asynchronous rather than a response. Their 16-byte payload is temperature
+in signed milli-Celsius, voltage in millivolts, uptime seconds, and sample
+counter (four little-endian 32-bit fields). START_TELEMETRY accepts an interval
+from 100 to 60000 ms.

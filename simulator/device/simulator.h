@@ -17,6 +17,10 @@ struct simulator_state {
     uint32_t device_id;
     int32_t temperature_millic;
     uint32_t voltage_mv;
+    uint32_t telemetry_interval_ms;
+    uint32_t telemetry_samples;
+    uint64_t next_telemetry_ns;
+    bool telemetry_enabled;
     bool running;
 };
 
@@ -25,4 +29,3 @@ int simulator_run(struct simulator_state *simulator);
 void simulator_request_stop(void);
 
 #endif
-
