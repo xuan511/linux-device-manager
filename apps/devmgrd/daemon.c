@@ -264,7 +264,9 @@ static int read_transport(struct daemon_context *context)
                                             context, &emitted);
             if (result != DEVMGR_OK) return result;
         } else if (count == 0) {
-            return DEVMGR_ERROR_DISCONNECTED;
+            /* A noncanonical TTY with VMIN=0/VTIME=0 may report no bytes after
+             * the ready data has been drained. EPOLLHUP/ERR owns disconnect. */
+            return DEVMGR_OK;
         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return DEVMGR_OK;
         } else {
