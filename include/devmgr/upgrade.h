@@ -15,6 +15,7 @@ enum devmgr_upgrade_state {
     DEVMGR_UPGRADE_ENTER_BOOTLOADER,
     DEVMGR_UPGRADE_BEGIN,
     DEVMGR_UPGRADE_TRANSFER,
+    DEVMGR_UPGRADE_RECOVER,
     DEVMGR_UPGRADE_END,
     DEVMGR_UPGRADE_VERIFY,
     DEVMGR_UPGRADE_ACTIVATE,
@@ -34,6 +35,7 @@ struct devmgr_upgrade {
     uint32_t last_chunk_end;
     uint16_t chunk_size;
     uint32_t chunks_sent;
+    uint8_t recovery_attempts;
 };
 
 void devmgr_upgrade_init(struct devmgr_upgrade *upgrade);
@@ -44,7 +46,7 @@ int devmgr_upgrade_build_request(struct devmgr_upgrade *upgrade, struct devmgr_f
 int devmgr_upgrade_accept_response(struct devmgr_upgrade *upgrade, uint8_t request_type,
                                    const struct devmgr_frame *response);
 bool devmgr_upgrade_active(const struct devmgr_upgrade *upgrade);
+int devmgr_upgrade_begin_recovery(struct devmgr_upgrade *upgrade);
 const char *devmgr_upgrade_state_string(enum devmgr_upgrade_state state);
 
 #endif
-

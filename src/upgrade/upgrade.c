@@ -65,6 +65,12 @@ int devmgr_upgrade_build_request(struct devmgr_upgrade *upgrade, struct devmgr_f
         upgrade->last_chunk_end = upgrade->offset + (uint32_t)chunk;
         ++upgrade->chunks_sent;
         break;
+    case DEVMGR_UPGRADE_RECOVER:
+        if (upgrade->session_id == 0U) return DEVMGR_ERROR_STATE;
+        frame->type = DEVMGR_MSG_FW_STATUS;
+        devmgr_put_le32(frame->payload, upgrade->session_id);
+        frame->payload_length = 4U;
+        break;
     case DEVMGR_UPGRADE_END:
     case DEVMGR_UPGRADE_VERIFY:
     case DEVMGR_UPGRADE_ACTIVATE:
@@ -113,6 +119,14 @@ int devmgr_upgrade_accept_response(struct devmgr_upgrade *upgrade, uint8_t reque
         upgrade->state = upgrade->offset == upgrade->image_size ? DEVMGR_UPGRADE_END
                                                                 : DEVMGR_UPGRADE_TRANSFER;
         return DEVMGR_OK;
+    case DEVMGR_UPGRADE_RECOVER:
+        if (request_type != DEVMGR_MSG_FW_STATUS || response->payload_length != 8U ||
+            devmgr_get_le32(response->payload) != upgrade->session_id) break;
+        upgrade->offset = devmgr_get_le32(response->payload + 4U);
+        if (upgrade->offset > upgrade->image_size) break;
+        upgrade->state = upgrade->offset == upgrade->image_size ? DEVMGR_UPGRADE_END
+                                                                : DEVMGR_UPGRADE_TRANSFER;
+        return DEVMGR_OK;
     case DEVMGR_UPGRADE_END:
         if (request_type != DEVMGR_MSG_FW_END) break;
         upgrade->state = DEVMGR_UPGRADE_VERIFY;
@@ -142,6 +156,20 @@ bool devmgr_upgrade_active(const struct devmgr_upgrade *upgrade)
            upgrade->state != DEVMGR_UPGRADE_COMPLETE && upgrade->state != DEVMGR_UPGRADE_ERROR;
 }
 
+int devmgr_upgrade_begin_recovery(struct devmgr_upgrade *upgrade)
+{
+    if (upgrade == NULL || upgrade->session_id == 0U ||
+        (upgrade->state != DEVMGR_UPGRADE_TRANSFER && upgrade->state != DEVMGR_UPGRADE_RECOVER))
+        return DEVMGR_ERROR_STATE;
+    if (upgrade->recovery_attempts >= 3U) {
+        upgrade->state = DEVMGR_UPGRADE_ERROR;
+        return DEVMGR_ERROR_TIMEOUT;
+    }
+    ++upgrade->recovery_attempts;
+    upgrade->state = DEVMGR_UPGRADE_RECOVER;
+    return DEVMGR_OK;
+}
+
 const char *devmgr_upgrade_state_string(enum devmgr_upgrade_state state)
 {
     switch (state) {
@@ -149,6 +177,7 @@ const char *devmgr_upgrade_state_string(enum devmgr_upgrade_state state)
     case DEVMGR_UPGRADE_ENTER_BOOTLOADER: return "ENTER_BOOTLOADER";
     case DEVMGR_UPGRADE_BEGIN: return "BEGIN";
     case DEVMGR_UPGRADE_TRANSFER: return "TRANSFER";
+    case DEVMGR_UPGRADE_RECOVER: return "RECOVER";
     case DEVMGR_UPGRADE_END: return "END";
     case DEVMGR_UPGRADE_VERIFY: return "VERIFY";
     case DEVMGR_UPGRADE_ACTIVATE: return "ACTIVATE";
@@ -158,4 +187,3 @@ const char *devmgr_upgrade_state_string(enum devmgr_upgrade_state state)
     default: return "UNKNOWN";
     }
 }
-

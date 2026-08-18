@@ -552,10 +552,16 @@ int devmgr_daemon_run(const struct devmgr_daemon_config *config)
                                              &context);
                 if (result == DEVMGR_ERROR_TIMEOUT && context.active_client >= 0) {
                     size_t index = (size_t)context.active_client;
-                    context.active_client = -1;
-                    uint8_t command = devmgr_upgrade_active(&context.upgrade)
-                                          ? DEVMGR_IPC_UPGRADE : 0U;
                     if (devmgr_upgrade_active(&context.upgrade)) {
+                        result = devmgr_upgrade_begin_recovery(&context.upgrade);
+                        if (result == DEVMGR_OK) result = queue_upgrade_request(&context);
+                        if (result == DEVMGR_OK) continue;
+                    }
+                    context.active_client = -1;
+                    uint8_t command = devmgr_upgrade_active(&context.upgrade) ||
+                                              context.upgrade.state == DEVMGR_UPGRADE_ERROR
+                                          ? DEVMGR_IPC_UPGRADE : 0U;
+                    if (command == DEVMGR_IPC_UPGRADE) {
                         context.upgrade.state = DEVMGR_UPGRADE_ERROR;
                         devmgr_firmware_close(&context.firmware);
                         (void)devmgr_session_transition(&context.session,

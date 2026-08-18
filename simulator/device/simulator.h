@@ -33,9 +33,27 @@ struct simulator_state {
     bool firmware_upgrading;
     bool firmware_verified;
     bool running;
+    double drop_rate;
+    double corrupt_rate;
+    uint32_t response_delay_ms;
+    int disconnect_at_percent;
+    uint64_t outage_until_ns;
+    bool outage_injected;
+    bool fail_verify;
+    uint32_t random_state;
 };
 
-int simulator_init(struct simulator_state *simulator, int master_fd);
+struct simulator_config {
+    double drop_rate;
+    double corrupt_rate;
+    uint32_t response_delay_ms;
+    int disconnect_at_percent;
+    bool fail_verify;
+    uint32_t random_seed;
+};
+
+int simulator_init(struct simulator_state *simulator, int master_fd,
+                   const struct simulator_config *config);
 int simulator_run(struct simulator_state *simulator);
 void simulator_request_stop(void);
 void simulator_cleanup(struct simulator_state *simulator);

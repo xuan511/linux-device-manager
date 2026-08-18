@@ -15,6 +15,16 @@
 
 static volatile sig_atomic_t stop_requested;
 
+static double simulator_random(struct simulator_state *simulator)
+{
+    uint32_t value = simulator->random_state;
+    value ^= value << 13U;
+    value ^= value >> 17U;
+    value ^= value << 5U;
+    simulator->random_state = value;
+    return (double)value / 4294967296.0;
+}
+
 static uint64_t simulator_now_ns(void)
 {
     struct timespec now;
@@ -34,10 +44,20 @@ static int write_frame(struct simulator_state *simulator, const struct devmgr_fr
     uint8_t encoded[DEVMGR_PROTOCOL_MAX_FRAME];
     size_t length = 0U;
     size_t offset = 0U;
+    uint64_t now_ns = simulator_now_ns();
+    if (now_ns < simulator->outage_until_ns || simulator_random(simulator) < simulator->drop_rate)
+        return DEVMGR_OK;
     int result = devmgr_frame_encode(frame, encoded, sizeof(encoded), &length);
 
     if (result != DEVMGR_OK) {
         return result;
+    }
+    if (simulator_random(simulator) < simulator->corrupt_rate && length > DEVMGR_PROTOCOL_HEADER_SIZE)
+        encoded[DEVMGR_PROTOCOL_HEADER_SIZE] ^= 0x40U;
+    if (simulator->response_delay_ms != 0U) {
+        struct timespec delay = {.tv_sec = (time_t)(simulator->response_delay_ms / 1000U),
+                                 .tv_nsec = (long)(simulator->response_delay_ms % 1000U) * 1000000L};
+        while (nanosleep(&delay, &delay) < 0 && errno == EINTR) {}
     }
     while (offset < length) {
         ssize_t count = write(simulator->master_fd, encoded + offset, length - offset);
@@ -216,10 +236,30 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         }
         devmgr_put_le32(response.payload, simulator->firmware_offset);
         response.payload_length = 4U;
+        if (!simulator->outage_injected && simulator->disconnect_at_percent >= 0 &&
+            simulator->flash_size != 0U &&
+            (uint64_t)simulator->firmware_offset * 100U / simulator->flash_size >=
+                (uint64_t)simulator->disconnect_at_percent) {
+            simulator->outage_injected = true;
+            simulator->outage_until_ns = simulator_now_ns() + UINT64_C(6000000000);
+        }
         break;
     }
+    case DEVMGR_MSG_FW_STATUS:
+        if (!simulator->firmware_upgrading || request->payload_length != 4U ||
+            devmgr_get_le32(request->payload) != simulator->firmware_session_id) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 2U);
+            response.payload_length = 2U;
+        } else {
+            devmgr_put_le32(response.payload, simulator->firmware_session_id);
+            devmgr_put_le32(response.payload + 4U, simulator->firmware_offset);
+            response.payload_length = 8U;
+        }
+        break;
     case DEVMGR_MSG_FW_END:
         if (!simulator->firmware_upgrading || request->payload_length != 4U ||
+            simulator->fail_verify ||
             devmgr_get_le32(request->payload) != simulator->firmware_session_id ||
             simulator->firmware_offset != simulator->flash_size) {
             response.type = DEVMGR_MSG_NACK;
@@ -288,7 +328,8 @@ static int emit_telemetry(struct simulator_state *simulator, uint64_t now_ns)
     return write_frame(simulator, &frame);
 }
 
-int simulator_init(struct simulator_state *simulator, int master_fd)
+int simulator_init(struct simulator_state *simulator, int master_fd,
+                   const struct simulator_config *config)
 {
     if (simulator == NULL || master_fd < 0) {
         return DEVMGR_ERROR_INVALID;
@@ -299,6 +340,16 @@ int simulator_init(struct simulator_state *simulator, int master_fd)
     simulator->temperature_millic = 36500;
     simulator->voltage_mv = 3300U;
     simulator->running = true;
+    simulator->disconnect_at_percent = -1;
+    simulator->random_state = UINT32_C(0xC0FFEE01);
+    if (config != NULL) {
+        simulator->drop_rate = config->drop_rate;
+        simulator->corrupt_rate = config->corrupt_rate;
+        simulator->response_delay_ms = config->response_delay_ms;
+        simulator->disconnect_at_percent = config->disconnect_at_percent;
+        simulator->fail_verify = config->fail_verify;
+        if (config->random_seed != 0U) simulator->random_state = config->random_seed;
+    }
     memcpy(simulator->firmware_version, "1.0.0", sizeof("1.0.0"));
     (void)clock_gettime(CLOCK_MONOTONIC, &simulator->started_at);
     return devmgr_parser_init(&simulator->parser);

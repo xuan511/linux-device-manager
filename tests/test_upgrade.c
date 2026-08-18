@@ -68,11 +68,35 @@ static int test_upgrade_rejects_bad_offset(void)
     return 0;
 }
 
+static int test_upgrade_resume_status(void)
+{
+    uint8_t image[32] = {0U};
+    struct devmgr_upgrade upgrade;
+    struct devmgr_frame request;
+    struct devmgr_frame response = {.flags = DEVMGR_FRAME_RESPONSE};
+    TEST_CHECK(devmgr_upgrade_start(&upgrade, image, sizeof(image), 1U, "3.0.0", 8U) == DEVMGR_OK);
+    TEST_CHECK(devmgr_upgrade_build_request(&upgrade, &request) == DEVMGR_OK);
+    TEST_CHECK(devmgr_upgrade_accept_response(&upgrade, request.type, &response) == DEVMGR_OK);
+    TEST_CHECK(devmgr_upgrade_build_request(&upgrade, &request) == DEVMGR_OK);
+    response.payload_length = 8U;
+    devmgr_put_le32(response.payload, 42U);
+    devmgr_put_le32(response.payload + 4U, 0U);
+    TEST_CHECK(devmgr_upgrade_accept_response(&upgrade, request.type, &response) == DEVMGR_OK);
+    TEST_CHECK(devmgr_upgrade_begin_recovery(&upgrade) == DEVMGR_OK);
+    TEST_CHECK(devmgr_upgrade_build_request(&upgrade, &request) == DEVMGR_OK);
+    TEST_CHECK(request.type == DEVMGR_MSG_FW_STATUS);
+    devmgr_put_le32(response.payload, 42U);
+    devmgr_put_le32(response.payload + 4U, 16U);
+    TEST_CHECK(devmgr_upgrade_accept_response(&upgrade, request.type, &response) == DEVMGR_OK);
+    TEST_CHECK(upgrade.state == DEVMGR_UPGRADE_TRANSFER && upgrade.offset == 16U);
+    return 0;
+}
+
 int main(void)
 {
     int failed = 0;
     TEST_RUN(test_complete_upgrade);
     TEST_RUN(test_upgrade_rejects_bad_offset);
+    TEST_RUN(test_upgrade_resume_status);
     return failed == 0 ? 0 : 1;
 }
-
