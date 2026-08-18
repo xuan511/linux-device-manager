@@ -36,8 +36,9 @@ The daemon runs foreground and uses one epoll reactor. It owns the serial fd,
 listener and client sockets, timerfd, signalfd, parser, request tracker, and all
 mutable session state. Partial serial and socket output stays in reactor-owned
 buffers. timerfd provides periodic monotonic deadline checks; signalfd makes
-SIGINT/SIGTERM ordinary ordered events. No worker exists until firmware file
-validation needs one in Phase 7.
+SIGINT/SIGTERM ordinary ordered events. Firmware file mapping/CRC is currently
+bounded but synchronous; the documented next concurrency change is one
+validation worker with an eventfd completion, without sharing session/fd state.
 
 ## Resource Ownership
 
