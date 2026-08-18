@@ -25,6 +25,6 @@ jobs:
               line=${line//'%'/'%25'}
               line=${line//$'\r'/'%0D'}
               printf '::error::%s\n' "$line"
-            done <<<"$output"
+            done < <(tail -n 40 <<<"$output" | tac)
           fi
           exit "$status"
