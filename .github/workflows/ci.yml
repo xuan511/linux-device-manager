@@ -14,5 +14,17 @@ jobs:
       - name: Build
         run: cmake --build --preset debug -j2
       - name: Test
-        run: ctest --preset debug --output-on-failure
-
+        shell: bash
+        run: |
+          set +e
+          output=$(ctest --preset debug --output-on-failure 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          if (( status != 0 )); then
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/'%0D'}
+              printf '::error::%s\n' "$line"
+            done <<<"$output"
+          fi
+          exit "$status"
