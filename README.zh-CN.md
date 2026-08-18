@@ -79,8 +79,8 @@ build/debug/device-sim --fail-verify
 ## 真实限制
 
 - 当前 daemon 只管理一个配置好的 transport，尚未实现多设备/hotplug。
-- 固件 mmap/CRC 目前在 operation 启动时由 reactor 完成；16 MiB 上限控制停顿，
-  后续应迁移到 worker + eventfd。
+- 固件 mmap/CRC 由单个有界 validation worker 完成；worker 不拥有 session 或
+  transport 状态，通过 eventfd 通知 reactor，并显式移交只读结果 ownership。
 - Simulator flash 是内存模型，不能证明真实擦写时序或掉电原子性。
 - 尚无固件签名和 anti-rollback；CRC 不是安全认证。
 - Host + Simulator：CI 已验证；STM32 portable core：交叉编译已验证；STM32
@@ -90,4 +90,3 @@ build/debug/device-sim --fail-verify
 [协议](docs/protocol.md)、[可靠性](docs/reliability.md)、
 [固件升级](docs/firmware-update.md)，最后按
 [中文学习指南](docs/learning-guide.zh-CN.md) 删除并重写模块。
-

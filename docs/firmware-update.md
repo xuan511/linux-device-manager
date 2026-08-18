@@ -3,13 +3,16 @@
 ## Host Image Handling
 
 `devctl upgrade FILE VERSION` resolves the path and sends it over owner-only UDS
-IPC. The daemon opens with `O_NOFOLLOW|O_CLOEXEC`, requires a nonempty regular
-file no larger than 16 MiB, maps it read-only/private, and computes CRC32. It
-never allocates `file_size` bytes or sends the whole image in one frame. Mapping
-and fd are released on success, protocol failure, timeout, signal shutdown, and
-setup failure.
+IPC. One bounded worker opens with `O_NOFOLLOW|O_CLOEXEC`, requires a nonempty
+regular file no larger than 16 MiB, maps it read-only/private, and computes
+CRC32. The worker posts an immutable result through a single-slot mailbox and
+notifies epoll with eventfd; the reactor alone adopts the mapping and advances
+the upgrade state machine. It never allocates `file_size` bytes or sends the
+whole image in one frame. Mapping and fd are released on success, protocol
+failure, timeout, signal shutdown, validation failure, and setup failure.
 
-Starting an upgrade returns a daemon operation ID immediately. The CLI polls
+Starting an upgrade queues validation and returns a daemon operation ID
+immediately. The operation first reports `VALIDATING`; the CLI polls
 state, result, acknowledged offset, and total size over separate bounded IPC
 connections. There is no operation-wide IPC timeout: individual local exchanges
 have a five-second liveness bound, while device requests retain their own

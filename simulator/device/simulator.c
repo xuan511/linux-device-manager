@@ -177,6 +177,15 @@ static int on_frame(const struct devmgr_frame *request, void *context)
             response.payload_length = 2U;
             break;
         }
+        if (simulator->firmware_upgrading && simulator->flash_size == image_size &&
+            simulator->expected_firmware_crc == image_crc &&
+            simulator->firmware_chunk_size == chunk_size &&
+            strcmp(simulator->pending_version, (const char *)request->payload + 10U) == 0) {
+            devmgr_put_le32(response.payload, simulator->firmware_session_id);
+            devmgr_put_le32(response.payload + 4U, simulator->firmware_offset);
+            response.payload_length = 8U;
+            break;
+        }
         uint8_t *new_flash = malloc(image_size);
         if (new_flash == NULL) {
             response.type = DEVMGR_MSG_NACK;
@@ -259,7 +268,6 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         break;
     case DEVMGR_MSG_FW_END:
         if (!simulator->firmware_upgrading || request->payload_length != 4U ||
-            simulator->fail_verify ||
             devmgr_get_le32(request->payload) != simulator->firmware_session_id ||
             simulator->firmware_offset != simulator->flash_size) {
             response.type = DEVMGR_MSG_NACK;
@@ -271,6 +279,8 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         uint32_t actual_crc = simulator->flash == NULL ? 0U :
                               devmgr_crc32(simulator->flash, simulator->flash_size);
         if (!simulator->firmware_upgrading || request->payload_length != 4U ||
+            devmgr_get_le32(request->payload) != simulator->firmware_session_id ||
+            simulator->fail_verify ||
             actual_crc != simulator->expected_firmware_crc) {
             response.type = DEVMGR_MSG_NACK;
             devmgr_put_le16(response.payload, 7U);
@@ -283,7 +293,8 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         break;
     }
     case DEVMGR_MSG_FW_ACTIVATE:
-        if (!simulator->firmware_verified) {
+        if (!simulator->firmware_verified || request->payload_length != 4U ||
+            devmgr_get_le32(request->payload) != simulator->firmware_session_id) {
             response.type = DEVMGR_MSG_NACK;
             devmgr_put_le16(response.payload, 2U);
             response.payload_length = 2U;

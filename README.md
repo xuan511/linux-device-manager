@@ -166,9 +166,9 @@ See [ADRs](docs/adr/) for alternatives and consequences.
 
 - The daemon currently manages one configured transport, not hotplug discovery
   or multiple devices.
-- Firmware mapping/CRC happens at operation start on the reactor; the 16 MiB cap
-  bounds this pause, but a worker/eventfd validation path is the next concurrency
-  improvement.
+- Firmware mapping/CRC runs on one bounded validation worker. The worker owns no
+  session or transport state; it returns an immutable result to the reactor via
+  eventfd, where ownership is transferred explicitly.
 - Simulator flash is memory-backed and does not model erase timing/power loss.
 - No authentication or firmware signature exists; local socket permissions and
   CRC provide integrity against accidents, not malicious firmware.
@@ -177,11 +177,10 @@ See [ADRs](docs/adr/) for alternatives and consequences.
 
 ## Roadmap
 
-1. Worker-thread firmware validation with eventfd completion.
-2. Multiple device sessions and udev-driven hotplug/reconnect.
-3. Signed image metadata, anti-rollback, and persistent operation journal.
+1. Multiple device sessions and udev-driven hotplug/reconnect.
+2. Signed image metadata, anti-rollback, and persistent operation journal.
+3. Privilege separation for firmware file validation.
 4. Real STM32 board port and power-cut test fixture.
 
 No performance number is claimed here; run `scripts/benchmark.sh` on the target
 machine and record the environment with the result.
-

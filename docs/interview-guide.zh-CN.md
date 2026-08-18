@@ -35,11 +35,10 @@
 31. **如何检查 fd 泄漏？** `/proc/$pid/fd`、strace close、Valgrind/`--track-fds`; SIGTERM 后进程/socket 都消失。
 32. **daemon 为什么 foreground？** systemd 管 fork/restart/log/runtime dir；自行 double-fork 会让监督和退出状态更复杂。
 33. **systemd 服务为何不默认 root？** 串口通过 dialout/udev 授权，socket/runtime dir 由专用账号拥有，减少攻击面。
-34. **当前 concurrency 最大缺口？** mmap/CRC validation 仍在 reactor；下一步单 worker+有界队列+eventfd，不把 session 变成共享对象。
+34. **并发边界如何设计？** mmap/CRC validation 在单 worker；有界 mailbox+eventfd 把结果交回 reactor，不把 session 变成共享对象。
 35. **eventfd 应传什么？** 只传 completion 计数；实际 immutable result 放受 mutex 保护的队列，reactor 读取后接管。
 36. **condition variable 为什么用 while？** 唤醒可能虚假或条件被其他消费者改变；必须在 mutex 下重查谓词。
 37. **STM32 端验证到了哪里？** portable protocol/update core 用 arm-none-eabi-gcc Cortex-M3 warnings-as-errors 编译；没有链接/烧录/实机行为验证。
 38. **真实 STM32 port 还缺什么？** startup/linker/HAL、UART DMA、flash geometry、boot metadata、掉电原子性、watchdog、跳转和板级测试。
 39. **如何做性能陈述？** 保存环境/commit/raw samples，区分 PTY 与 115200 UART，报告分布；没有测量就不写数字。
 40. **你会先重写哪个模块证明 ownership？** parser：范围小但覆盖 ring/stream/CRC/resync；保留 tests/header，删除实现，从失败测试逐步恢复。
-

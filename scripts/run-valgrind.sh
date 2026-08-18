@@ -7,7 +7,8 @@ command -v valgrind >/dev/null || { echo "valgrind is required" >&2; exit 2; }
 cmake --preset debug
 cmake --build --preset debug -j2
 
-tests=(test_common test_protocol test_session test_ipc test_upgrade test_parser_stress test_transport)
+tests=(test_common test_protocol test_session test_ipc test_upgrade test_parser_stress
+       test_transport test_worker)
 for test_name in "${tests[@]}"; do
     echo "Valgrind: ${test_name}"
     valgrind --quiet --leak-check=full --show-leak-kinds=definite \
@@ -17,4 +18,3 @@ done
 
 echo "Valgrind: simulator/daemon/CLI demo"
 DEVMGR_BINARY_DIR="${binary_dir}" DEVMGR_VALGRIND=1 "${project_root}/scripts/run-demo.sh"
-

@@ -70,15 +70,15 @@
 ## 09 eventfd
 
 - 是什么/为什么：eventfd 是线程/内核到 reactor 的计数通知 fd，适合 worker completion。
-- 项目状态/位置：架构 ADR 已预留；当前固件 mmap/CRC 仍同步，尚未接入 worker/eventfd。
-- 错误/防御：不读取、计数溢出、结果 ownership 不清；未来由 reactor 读取并接管 immutable result。
-- 断点/实验：先写 eventfd ping-pong 小程序，再把 firmware validation 迁移为单 worker。
-- 重写/面试：这是推荐首个扩展；解释 eventfd 为什么只传通知、不传大型结果。
+- 项目状态/位置：`src/worker/worker.c` 完成固件 mmap/CRC，eventfd 接入 daemon epoll。
+- 错误/防御：不读取、计数溢出、结果 ownership 不清；reactor 读取通知并接管 immutable result。
+- 断点/实验：在 `handle_worker_completion` 断点，观察 result 从 worker 移交 reactor。
+- 重写/面试：解释 eventfd 为什么只传通知、不传大型结果。
 
 ## 10 pthread
 
 - 是什么/为什么：pthread 提供并发执行；只应把耗时 CPU/文件任务移出 reactor。
-- 项目状态：当前 host 核心单线程，避免虚假并发；计划一个有界 validation worker。
+- 项目状态：host 状态核心保持单 reactor，只有一个有界 validation worker。
 - 错误/防御：线程过多、fd 多 owner、退出 join 遗漏；限定一个 worker，reactor 仍拥有状态/fd。
 - 断点/实验：用 `thread apply all bt`；实现启动、任务、停止、join 的最小生命周期。
 - 重写/面试：回答“哪些代码绝不能让 worker 直接修改？”
@@ -86,7 +86,7 @@
 ## 11 mutex / condition variable
 
 - 是什么/为什么：mutex 保护队列不变量，condvar 在谓词变化时休眠/唤醒 worker。
-- 项目状态：随 worker 路线实现；不要给 reactor-owned session 随意加锁。
+- 项目状态：worker 单槽 mailbox 已实现；不要给 reactor-owned session 随意加锁。
 - 错误/防御：忘记 while 检查谓词、丢唤醒、锁内耗时、退出死锁；队列有界并有 stop 标志。
 - 断点/实验：制造 spurious wakeup；用 TSAN 扩展 CI；画锁顺序图。
 - 重写/面试：解释 condition variable 为什么必须和谓词、mutex 一起使用。
@@ -226,4 +226,3 @@
 - 错误/防御：隐藏日志、删除 flaky integration、只跑 Debug；失败注释、原测试、Release/install。
 - 断点/实验：本地 `ci-local.sh`，再故意破坏 known vector 观察各 job。
 - 重写/面试：解释为什么 job 分开，以及 CI success 仍不能证明实机行为。
-

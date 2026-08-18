@@ -174,6 +174,7 @@ const char *devmgr_upgrade_state_string(enum devmgr_upgrade_state state)
 {
     switch (state) {
     case DEVMGR_UPGRADE_IDLE: return "IDLE";
+    case DEVMGR_UPGRADE_VALIDATING: return "VALIDATING";
     case DEVMGR_UPGRADE_ENTER_BOOTLOADER: return "ENTER_BOOTLOADER";
     case DEVMGR_UPGRADE_BEGIN: return "BEGIN";
     case DEVMGR_UPGRADE_TRANSFER: return "TRANSFER";

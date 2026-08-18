@@ -33,6 +33,10 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(test_transport PRIVATE devmgr_transport)
     add_test(NAME unit.transport COMMAND test_transport)
 
+    add_executable(test_worker test_worker.c)
+    target_link_libraries(test_worker PRIVATE devmgr_worker)
+    add_test(NAME unit.worker COMMAND test_worker)
+
     add_test(NAME integration.demo
              COMMAND ${CMAKE_COMMAND} -E env DEVMGR_BINARY_DIR=$<TARGET_FILE_DIR:devmgrd>
                      bash ${PROJECT_SOURCE_DIR}/scripts/run-demo.sh)

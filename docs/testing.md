@@ -2,7 +2,8 @@
 
 - Unit tests validate CRC vectors, ring boundaries/wrap, frame codec/parser
   recovery, IPC bounds, state transitions, retry deadlines, transport PTY I/O,
-  upgrade progress, invalid offsets, and FW_STATUS resume.
+  upgrade progress, invalid offsets, FW_STATUS resume, and worker success/error
+  completion with eventfd ownership transfer.
 - `stress.parser` feeds 2000 valid frames through pseudo-random 1–23 byte slices
   with garbage inserted, then runs 10,000 random-input iterations.
 - `integration.demo` starts all three processes and verifies query, telemetry,

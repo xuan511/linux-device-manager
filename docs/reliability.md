@@ -22,7 +22,9 @@ Requests carry a nonzero sequence and use CLOCK_MONOTONIC deadlines. The session
 keeps one owned request copy, repeats it with the retry flag, and stops at the
 policy limit. Wrong, stale, duplicate, and unsolicited sequences cannot complete
 the pending request. Firmware chunks add session+offset idempotency: replayed
-data is ACKed only when it exactly matches already committed bytes.
+data is ACKed only when it exactly matches already committed bytes. Replayed
+FW_BEGIN with identical metadata returns the existing session and offset instead
+of erasing progress after a lost response.
 
 ## Firmware Resume
 
@@ -51,6 +53,8 @@ and `/dev` renumbering remain hardware/udev integration tests.
 
 SIGINT/SIGTERM are blocked and consumed through signalfd, ordering shutdown with
 other reactor work. Cleanup closes clients, transport, signal/timer/listener/
-epoll fds, unmaps firmware, and unlinks only the configured daemon socket. The
-simulator frees emulated flash. Device reboot keeps the PTY in the simulator;
-real hardware reconnect behavior needs physical validation.
+epoll fds, stops and joins the validation worker, unmaps firmware, and unlinks
+only the configured daemon socket. A worker finishing during shutdown retains
+its result until the join path releases it. The simulator frees emulated flash.
+Device reboot keeps the PTY in the simulator; real hardware reconnect behavior
+needs physical validation.

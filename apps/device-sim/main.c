@@ -5,6 +5,8 @@
 
 #include <signal.h>
 #include <getopt.h>
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +22,7 @@ int main(int argc, char **argv)
 {
     char slave_path[256];
     int master_fd = -1;
-    struct simulator_state simulator;
+    struct simulator_state simulator = {0};
     struct sigaction action;
     int result;
     struct simulator_config config = {.disconnect_at_percent = -1};
@@ -39,10 +41,25 @@ int main(int argc, char **argv)
         switch (option) {
         case 'd': config.drop_rate = strtod(optarg, &end); break;
         case 'c': config.corrupt_rate = strtod(optarg, &end); break;
-        case 'l': config.response_delay_ms = (uint32_t)strtoul(optarg, &end, 10); break;
-        case 'x': config.disconnect_at_percent = (int)strtol(optarg, &end, 10); break;
+        case 'l': {
+            unsigned long value = strtoul(optarg, &end, 10);
+            if (value > UINT32_MAX) return 2;
+            config.response_delay_ms = (uint32_t)value;
+            break;
+        }
+        case 'x': {
+            long value = strtol(optarg, &end, 10);
+            if (value < INT_MIN || value > INT_MAX) return 2;
+            config.disconnect_at_percent = (int)value;
+            break;
+        }
         case 'v': config.fail_verify = true; continue;
-        case 's': config.random_seed = (uint32_t)strtoul(optarg, &end, 10); break;
+        case 's': {
+            unsigned long value = strtoul(optarg, &end, 10);
+            if (value > UINT32_MAX) return 2;
+            config.random_seed = (uint32_t)value;
+            break;
+        }
         case 'h':
             (void)printf("Usage: %s [--drop-rate 0..1] [--corrupt-rate 0..1] "
                          "[--delay-ms N] [--disconnect-at-percent 0..100] "
@@ -52,7 +69,8 @@ int main(int argc, char **argv)
         }
         if (end == optarg || *end != '\0') return 2;
     }
-    if (optind != argc || config.drop_rate < 0.0 || config.drop_rate > 1.0 ||
+    if (optind != argc || !isfinite(config.drop_rate) || config.drop_rate < 0.0 ||
+        config.drop_rate > 1.0 || !isfinite(config.corrupt_rate) ||
         config.corrupt_rate < 0.0 || config.corrupt_rate > 1.0 ||
         config.response_delay_ms > 60000U || config.disconnect_at_percent < -1 ||
         config.disconnect_at_percent > 100) return 2;

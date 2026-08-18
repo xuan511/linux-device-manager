@@ -56,6 +56,10 @@ static int test_request_response(void)
     response.sequence = 99U;
     TEST_CHECK(devmgr_session_accept_response(&session, &response) == DEVMGR_ERROR_PROTOCOL);
     response.sequence = 1U;
+    response.type = DEVMGR_MSG_GET_INFO;
+    TEST_CHECK(devmgr_session_accept_response(&session, &response) == DEVMGR_ERROR_PROTOCOL);
+    response.type = DEVMGR_MSG_PING;
+    response.sequence = 1U;
     TEST_CHECK(devmgr_session_accept_response(&session, &response) == DEVMGR_OK);
     TEST_CHECK(!session.pending.active && session.stats.responses == 1U);
     TEST_CHECK(devmgr_session_accept_response(&session, &response) == DEVMGR_ERROR_NOT_FOUND);
@@ -93,4 +97,3 @@ int main(void)
     TEST_RUN(test_retry_timeout);
     return failed == 0 ? 0 : 1;
 }
-

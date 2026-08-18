@@ -231,6 +231,7 @@ int main(int argc, char **argv)
     else if (strcmp(argv[optind], "health") == 0) command = DEVMGR_MSG_GET_HEALTH;
     else if (strcmp(argv[optind], "stats") == 0) command = DEVMGR_MSG_GET_STATS;
     else if (strcmp(argv[optind], "telemetry-start") == 0) {
+        if (optind + 2 < argc) { usage(argv[0]); return 2; }
         char *end = NULL;
         unsigned long interval = optind + 1 < argc ? strtoul(argv[optind + 1], &end, 10) : 1000UL;
         if ((end != NULL && *end != '\0') || interval < 100UL || interval > 60000UL) {
@@ -244,7 +245,8 @@ int main(int argc, char **argv)
     else if (strcmp(argv[optind], "telemetry") == 0) command = DEVMGR_IPC_GET_TELEMETRY;
     else if (strcmp(argv[optind], "upgrade") == 0) {
         char resolved[PATH_MAX];
-        if (optind + 1 >= argc || realpath(argv[optind + 1], resolved) == NULL) {
+        if (optind + 1 >= argc || optind + 3 < argc ||
+            realpath(argv[optind + 1], resolved) == NULL) {
             (void)fprintf(stderr, "cannot resolve firmware file\n"); return 2;
         }
         const char *version = optind + 2 < argc ? argv[optind + 2] : "1.1.0";
@@ -259,6 +261,7 @@ int main(int argc, char **argv)
         command = DEVMGR_IPC_UPGRADE;
     }
     else if (strcmp(argv[optind], "upgrade-status") == 0) {
+        if (optind + 2 != argc) { usage(argv[0]); return 2; }
         char *end = NULL;
         unsigned long operation = optind + 1 < argc ? strtoul(argv[optind + 1], &end, 10) : 0UL;
         if (operation == 0UL || operation > UINT32_MAX || end == NULL || *end != '\0') {

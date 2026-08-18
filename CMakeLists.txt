@@ -57,6 +57,7 @@ target_include_directories(devmgr_upgrade PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_upgrade PUBLIC devmgr_protocol)
 
 if(UNIX AND NOT APPLE)
+    find_package(Threads REQUIRED)
     add_library(devmgr_transport STATIC)
     target_sources(devmgr_transport PRIVATE
         src/transport/serial.c
@@ -68,6 +69,10 @@ if(UNIX AND NOT APPLE)
     target_sources(devmgr_upgrade PRIVATE src/upgrade/firmware.c)
     target_compile_definitions(devmgr_upgrade PRIVATE _GNU_SOURCE)
 
+    add_library(devmgr_worker STATIC src/worker/worker.c)
+    target_include_directories(devmgr_worker PUBLIC ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(devmgr_worker PUBLIC devmgr_upgrade Threads::Threads)
+
     add_executable(device-sim
         apps/device-sim/main.c
         simulator/device/simulator.c)
@@ -77,7 +82,8 @@ if(UNIX AND NOT APPLE)
 
     add_executable(devmgrd apps/devmgrd/main.c apps/devmgrd/daemon.c)
     target_include_directories(devmgrd PRIVATE apps/devmgrd)
-    target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport devmgr_upgrade)
+    target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport devmgr_upgrade
+                                              devmgr_worker)
 
     add_executable(devctl apps/devctl/main.c)
     target_link_libraries(devctl PRIVATE devmgr_ipc devmgr_upgrade)

@@ -11,6 +11,7 @@
 #include "devmgr/session.h"
 #include "devmgr/transport.h"
 #include "devmgr/upgrade.h"
+#include "devmgr/worker.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -63,9 +64,51 @@ struct daemon_context {
     struct devmgr_upgrade upgrade;
     uint32_t upgrade_operation_id;
     int upgrade_result;
+    struct devmgr_worker worker;
+    char pending_upgrade_version[DEVMGR_UPGRADE_VERSION_MAX + 1U];
 };
 
 static int queue_upgrade_request(struct daemon_context *context);
+
+static int handle_worker_completion(struct daemon_context *context)
+{
+    uint64_t notifications;
+    ssize_t count;
+    do {
+        count = read(devmgr_worker_get_event_fd(&context->worker), &notifications,
+                     sizeof(notifications));
+    } while (count < 0 && errno == EINTR);
+    if (count != (ssize_t)sizeof(notifications)) return DEVMGR_ERROR_IO;
+    struct devmgr_validation_result validation;
+    int result = devmgr_worker_take_result(&context->worker, &validation);
+    if (result != DEVMGR_OK) return result;
+    if (validation.job_id != context->upgrade_operation_id ||
+        context->upgrade.state != DEVMGR_UPGRADE_VALIDATING) {
+        devmgr_firmware_close(&validation.image);
+        return DEVMGR_OK;
+    }
+    if (validation.status != DEVMGR_OK) {
+        context->upgrade_result = validation.status;
+        context->upgrade.state = DEVMGR_UPGRADE_ERROR;
+        return DEVMGR_OK;
+    }
+    context->firmware = validation.image;
+    result = devmgr_upgrade_start(&context->upgrade, context->firmware.data,
+                                  context->firmware.size, context->firmware.crc32,
+                                  context->pending_upgrade_version,
+                                  DEVMGR_UPGRADE_DEFAULT_CHUNK);
+    if (result == DEVMGR_OK)
+        result = devmgr_session_transition(&context->session, DEVMGR_SESSION_START_UPGRADE);
+    if (result == DEVMGR_OK) result = queue_upgrade_request(context);
+    if (result != DEVMGR_OK) {
+        context->upgrade_result = result;
+        context->upgrade.state = DEVMGR_UPGRADE_ERROR;
+        devmgr_firmware_close(&context->firmware);
+        if (context->session.state == DEVMGR_DEVICE_UPGRADING)
+            (void)devmgr_session_transition(&context->session, DEVMGR_SESSION_UPGRADE_DONE);
+    }
+    return DEVMGR_OK;
+}
 
 static uint64_t monotonic_ns(void)
 {
@@ -171,6 +214,8 @@ static int on_device_frame(const struct devmgr_frame *frame, void *opaque)
         return DEVMGR_OK;
     }
     if (context->session.state == DEVMGR_DEVICE_HANDSHAKING) {
+        if (frame->type == DEVMGR_MSG_NACK || frame->type == DEVMGR_MSG_ERROR)
+            return DEVMGR_ERROR_PROTOCOL;
         result = devmgr_session_transition(&context->session, DEVMGR_SESSION_HANDSHAKE_OK);
         if (result == DEVMGR_OK) {
             devmgr_log_write(DEVMGR_LOG_INFO, "daemon", "device is READY");
@@ -202,7 +247,9 @@ static int on_device_frame(const struct devmgr_frame *frame, void *opaque)
             else if (request_type == DEVMGR_MSG_STOP_TELEMETRY)
                 (void)devmgr_session_transition(&context->session, DEVMGR_SESSION_STOP_STREAM);
         }
-        return queue_client_response(context, index, request_type, DEVMGR_OK, frame->payload,
+        int response_status = frame->type == DEVMGR_MSG_NACK || frame->type == DEVMGR_MSG_ERROR
+                                  ? DEVMGR_ERROR_PROTOCOL : DEVMGR_OK;
+        return queue_client_response(context, index, request_type, response_status, frame->payload,
                                      frame->payload_length);
     }
     return DEVMGR_OK;
@@ -303,39 +350,32 @@ static int start_request(struct daemon_context *context, size_t client_index,
                                                            DEVMGR_ERROR_INVALID, NULL, 0U);
         size_t path_length = (size_t)(path_end - ipc_request->payload);
         size_t version_offset = path_length + 1U;
+        const uint8_t *version_end;
         if (path_length == 0U || version_offset >= ipc_request->payload_length ||
-            memchr(ipc_request->payload + version_offset, 0,
-                   ipc_request->payload_length - version_offset) == NULL)
+            (version_end = memchr(ipc_request->payload + version_offset, 0,
+                                  ipc_request->payload_length - version_offset)) == NULL)
+            return queue_client_response(context, client_index, ipc_request->command,
+                                         DEVMGR_ERROR_INVALID, NULL, 0U);
+        size_t version_length = (size_t)(version_end - (ipc_request->payload + version_offset));
+        if (version_length == 0U || version_length > DEVMGR_UPGRADE_VERSION_MAX)
             return queue_client_response(context, client_index, ipc_request->command,
                                          DEVMGR_ERROR_INVALID, NULL, 0U);
         if (context->session.state != DEVMGR_DEVICE_READY || context->active_client >= 0 ||
             devmgr_upgrade_active(&context->upgrade))
             return queue_client_response(context, client_index, ipc_request->command,
                                          DEVMGR_ERROR_BUSY, NULL, 0U);
-        int upgrade_result = devmgr_firmware_open(
-            &context->firmware, (const char *)ipc_request->payload);
-        if (upgrade_result == DEVMGR_OK)
-            upgrade_result = devmgr_upgrade_start(
-                &context->upgrade, context->firmware.data, context->firmware.size,
-                context->firmware.crc32, (const char *)ipc_request->payload + version_offset,
-                DEVMGR_UPGRADE_DEFAULT_CHUNK);
-        if (upgrade_result == DEVMGR_OK)
-            upgrade_result = devmgr_session_transition(&context->session,
-                                                       DEVMGR_SESSION_START_UPGRADE);
-        if (upgrade_result != DEVMGR_OK) {
-            devmgr_firmware_close(&context->firmware);
-            return queue_client_response(context, client_index, ipc_request->command,
-                                         upgrade_result, NULL, 0U);
-        }
         ++context->upgrade_operation_id;
         if (context->upgrade_operation_id == 0U) context->upgrade_operation_id = 1U;
         context->upgrade_result = DEVMGR_OK;
-        upgrade_result = queue_upgrade_request(context);
+        context->upgrade.state = DEVMGR_UPGRADE_VALIDATING;
+        memcpy(context->pending_upgrade_version, ipc_request->payload + version_offset,
+               version_length + 1U);
+        int upgrade_result = devmgr_worker_submit_firmware(
+            &context->worker, context->upgrade_operation_id,
+            (const char *)ipc_request->payload);
         if (upgrade_result != DEVMGR_OK) {
             context->upgrade_result = upgrade_result;
             context->upgrade.state = DEVMGR_UPGRADE_ERROR;
-            devmgr_firmware_close(&context->firmware);
-            (void)devmgr_session_transition(&context->session, DEVMGR_SESSION_UPGRADE_DONE);
             return queue_client_response(context, client_index, ipc_request->command,
                                          upgrade_result, NULL, 0U);
         }
@@ -344,6 +384,9 @@ static int start_request(struct daemon_context *context, size_t client_index,
         return queue_client_response(context, client_index, ipc_request->command, DEVMGR_OK,
                                      operation_payload, sizeof(operation_payload));
     }
+    if (devmgr_upgrade_active(&context->upgrade))
+        return queue_client_response(context, client_index, ipc_request->command,
+                                     DEVMGR_ERROR_BUSY, NULL, 0U);
     if (ipc_request->command == DEVMGR_MSG_START_TELEMETRY &&
         context->session.state != DEVMGR_DEVICE_READY)
         return queue_client_response(context, client_index, ipc_request->command,
@@ -490,18 +533,19 @@ static int setup_context(struct daemon_context *context, const struct devmgr_dae
     context->socket_path = config->socket_path;
     context->running = true;
     for (size_t index = 0U; index < MAX_CLIENTS; ++index) context->clients[index].fd = -1;
+    (void)sigemptyset(&signals);
+    (void)sigaddset(&signals, SIGINT);
+    (void)sigaddset(&signals, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &signals, NULL) < 0) return DEVMGR_ERROR_IO;
     devmgr_session_init(&context->session);
     devmgr_upgrade_init(&context->upgrade);
+    if (devmgr_worker_init(&context->worker) != DEVMGR_OK) return DEVMGR_ERROR_IO;
     if (devmgr_parser_init(&context->parser) != DEVMGR_OK) return DEVMGR_ERROR_IO;
     if (devmgr_transport_open(&context->transport, &transport_config) != DEVMGR_OK)
         return DEVMGR_ERROR_IO;
     context->listen_fd = create_listener(config->socket_path);
     context->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
     context->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    (void)sigemptyset(&signals);
-    (void)sigaddset(&signals, SIGINT);
-    (void)sigaddset(&signals, SIGTERM);
-    if (sigprocmask(SIG_BLOCK, &signals, NULL) < 0) return DEVMGR_ERROR_IO;
     context->signal_fd = signalfd(-1, &signals, SFD_NONBLOCK | SFD_CLOEXEC);
     if (context->listen_fd < 0 || context->epoll_fd < 0 || context->timer_fd < 0 ||
         context->signal_fd < 0 || timerfd_settime(context->timer_fd, 0, &interval, NULL) < 0)
@@ -509,6 +553,8 @@ static int setup_context(struct daemon_context *context, const struct devmgr_dae
     if (epoll_update(context, EPOLL_CTL_ADD, context->listen_fd, EPOLLIN) != DEVMGR_OK ||
         epoll_update(context, EPOLL_CTL_ADD, context->timer_fd, EPOLLIN) != DEVMGR_OK ||
         epoll_update(context, EPOLL_CTL_ADD, context->signal_fd, EPOLLIN) != DEVMGR_OK ||
+        epoll_update(context, EPOLL_CTL_ADD, devmgr_worker_get_event_fd(&context->worker),
+                     EPOLLIN) != DEVMGR_OK ||
         epoll_update(context, EPOLL_CTL_ADD, devmgr_transport_get_fd(&context->transport),
                      EPOLLIN) != DEVMGR_OK)
         return DEVMGR_ERROR_IO;
@@ -518,12 +564,13 @@ static int setup_context(struct daemon_context *context, const struct devmgr_dae
 static void cleanup_context(struct daemon_context *context)
 {
     for (size_t index = 0U; index < MAX_CLIENTS; ++index) close_client(context, index);
-    devmgr_transport_close(&context->transport);
-    devmgr_firmware_close(&context->firmware);
     if (context->signal_fd >= 0) (void)close(context->signal_fd);
     if (context->timer_fd >= 0) (void)close(context->timer_fd);
-    if (context->listen_fd >= 0) (void)close(context->listen_fd);
     if (context->epoll_fd >= 0) (void)close(context->epoll_fd);
+    if (context->listen_fd >= 0) (void)close(context->listen_fd);
+    devmgr_transport_close(&context->transport);
+    devmgr_worker_destroy(&context->worker);
+    devmgr_firmware_close(&context->firmware);
     if (context->socket_path != NULL) (void)unlink(context->socket_path);
 }
 
@@ -561,6 +608,8 @@ int devmgr_daemon_run(const struct devmgr_daemon_config *config)
             uint32_t flags = events[event_index].events;
             if (fd == context.listen_fd) result = accept_clients(&context);
             else if (fd == context.signal_fd) context.running = false;
+            else if (fd == devmgr_worker_get_event_fd(&context.worker))
+                result = handle_worker_completion(&context);
             else if (fd == context.timer_fd) {
                 uint64_t expirations;
                 (void)read(context.timer_fd, &expirations, sizeof(expirations));

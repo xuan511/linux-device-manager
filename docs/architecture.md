@@ -12,7 +12,7 @@ flowchart TD
     PTY <--> SIM[device-sim]
     R --> TF[timerfd deadlines]
     R --> SF[signalfd shutdown]
-    R -. Phase 7 .-> W[bounded file worker]
+    R <-->|eventfd completion| W[bounded validation worker]
 ```
 
 ## Data Flow
@@ -36,14 +36,16 @@ The daemon runs foreground and uses one epoll reactor. It owns the serial fd,
 listener and client sockets, timerfd, signalfd, parser, request tracker, and all
 mutable session state. Partial serial and socket output stays in reactor-owned
 buffers. timerfd provides periodic monotonic deadline checks; signalfd makes
-SIGINT/SIGTERM ordinary ordered events. Firmware file mapping/CRC is currently
-bounded but synchronous; the documented next concurrency change is one
-validation worker with an eventfd completion, without sharing session/fd state.
+SIGINT/SIGTERM ordinary ordered events. One bounded worker performs firmware
+open/mmap/CRC validation. A mutex and condition variable protect its single-job
+mailbox; eventfd returns completion to epoll. Only the reactor advances session
+and upgrade state, so no transport or session object is shared across threads.
 
 ## Resource Ownership
 
-`daemon_context` exclusively owns every daemon descriptor and closes them in
-reverse acquisition order. Each accepted client owns fixed input/output buffers
+`daemon_context` exclusively owns every daemon descriptor. A validation result
+owns its mapping until the reactor takes it, after which `daemon_context` owns
+and closes it. Each accepted client owns fixed input/output buffers
 and serves one request before close. `devmgr_transport` owns only its fd; parser
 and session own no heap memory. The simulator owns the PTY master while the
 daemon independently owns the slave.

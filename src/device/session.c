@@ -145,6 +145,11 @@ int devmgr_session_accept_response(struct devmgr_session *session,
         ++session->stats.unexpected_responses;
         return DEVMGR_ERROR_PROTOCOL;
     }
+    if (response->type != session->pending.frame.type && response->type != DEVMGR_MSG_ACK &&
+        response->type != DEVMGR_MSG_NACK && response->type != DEVMGR_MSG_ERROR) {
+        ++session->stats.unexpected_responses;
+        return DEVMGR_ERROR_PROTOCOL;
+    }
     session->last_completed_sequence = response->sequence;
     session->pending.active = false;
     ++session->stats.responses;
@@ -188,4 +193,3 @@ void devmgr_session_cancel_request(struct devmgr_session *session)
         session->pending.active = false;
     }
 }
-
