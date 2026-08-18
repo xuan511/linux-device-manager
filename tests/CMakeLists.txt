@@ -13,6 +13,11 @@ add_executable(test_session test_session.c)
 target_link_libraries(test_session PRIVATE devmgr_device)
 add_test(NAME unit.session COMMAND test_session)
 
+add_executable(test_ipc test_ipc.c)
+target_link_libraries(test_ipc PRIVATE devmgr_ipc)
+add_test(NAME unit.ipc COMMAND test_ipc)
+
+
 if(UNIX AND NOT APPLE)
     add_executable(test_transport test_transport.c)
     target_compile_definitions(test_transport PRIVATE _POSIX_C_SOURCE=200809L)

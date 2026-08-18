@@ -46,6 +46,10 @@ add_library(devmgr_device STATIC src/device/session.c)
 target_include_directories(devmgr_device PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_device PUBLIC devmgr_protocol)
 
+add_library(devmgr_ipc STATIC src/ipc/codec.c)
+target_include_directories(devmgr_ipc PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(devmgr_ipc PUBLIC devmgr_protocol)
+
 if(UNIX AND NOT APPLE)
     add_library(devmgr_transport STATIC)
     target_sources(devmgr_transport PRIVATE
@@ -61,6 +65,13 @@ if(UNIX AND NOT APPLE)
     target_include_directories(device-sim PRIVATE simulator/device)
     target_compile_definitions(device-sim PRIVATE _POSIX_C_SOURCE=200809L)
     target_link_libraries(device-sim PRIVATE devmgr_protocol devmgr_transport)
+
+    add_executable(devmgrd apps/devmgrd/main.c apps/devmgrd/daemon.c)
+    target_include_directories(devmgrd PRIVATE apps/devmgrd)
+    target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport)
+
+    add_executable(devctl apps/devctl/main.c)
+    target_link_libraries(devctl PRIVATE devmgr_ipc)
 endif()
 
 if(DEVMGR_BUILD_TESTS)
