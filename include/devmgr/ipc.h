@@ -10,6 +10,7 @@
 #define DEVMGR_IPC_RESPONSE_HEADER_SIZE 12U
 #define DEVMGR_IPC_MAX_PAYLOAD 4096U
 #define DEVMGR_IPC_GET_TELEMETRY UINT8_C(0xF0)
+#define DEVMGR_IPC_UPGRADE UINT8_C(0xF1)
 
 struct devmgr_ipc_request {
     uint8_t command;

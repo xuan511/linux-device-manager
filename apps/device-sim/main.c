@@ -42,6 +42,7 @@ int main(int argc, char **argv)
     if (result == DEVMGR_OK) {
         result = simulator_run(&simulator);
     }
+    simulator_cleanup(&simulator);
     (void)close(master_fd);
     if (result != DEVMGR_OK) {
         devmgr_log_write(DEVMGR_LOG_ERROR, "sim", "simulator stopped: %s",
@@ -50,4 +51,3 @@ int main(int argc, char **argv)
     }
     return 0;
 }
-

@@ -1,12 +1,15 @@
 #include "simulator.h"
 
 #include "devmgr/error.h"
+#include "devmgr/crc32.h"
+#include "devmgr/firmware.h"
 #include "devmgr/log.h"
 #include "devmgr/protocol.h"
 
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -86,7 +89,7 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         offset = 4U;
         put_string(response.payload, sizeof(response.payload), &offset, "STM32-SIM");
         put_string(response.payload, sizeof(response.payload), &offset, "HW-1.0");
-        put_string(response.payload, sizeof(response.payload), &offset, "1.0.0");
+        put_string(response.payload, sizeof(response.payload), &offset, simulator->firmware_version);
         put_string(response.payload, sizeof(response.payload), &offset, "BL-1.0.0");
         put_string(response.payload, sizeof(response.payload), &offset, "SIM00000001");
         response.payload_length = (uint16_t)offset;
@@ -125,6 +128,134 @@ static int on_frame(const struct devmgr_frame *request, void *context)
         break;
     case DEVMGR_MSG_STOP_TELEMETRY:
         simulator->telemetry_enabled = false;
+        response.payload_length = 0U;
+        break;
+    case DEVMGR_MSG_ENTER_BOOTLOADER:
+        simulator->telemetry_enabled = false;
+        simulator->bootloader_active = true;
+        response.payload_length = 0U;
+        break;
+    case DEVMGR_MSG_FW_BEGIN: {
+        if (!simulator->bootloader_active || request->payload_length < 11U) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 2U);
+            response.payload_length = 2U;
+            break;
+        }
+        uint32_t image_size = devmgr_get_le32(request->payload);
+        uint32_t image_crc = devmgr_get_le32(request->payload + 4U);
+        uint16_t chunk_size = devmgr_get_le16(request->payload + 8U);
+        const uint8_t *version_end = memchr(request->payload + 10U, 0,
+                                             request->payload_length - 10U);
+        size_t version_length = version_end == NULL ? 0U :
+                                (size_t)(version_end - (request->payload + 10U));
+        if (image_size == 0U || image_size > DEVMGR_FIRMWARE_MAX_SIZE || chunk_size == 0U ||
+            chunk_size > DEVMGR_PROTOCOL_MAX_PAYLOAD - 8U || version_length == 0U ||
+            version_length >= sizeof(simulator->pending_version)) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 3U);
+            response.payload_length = 2U;
+            break;
+        }
+        uint8_t *new_flash = malloc(image_size);
+        if (new_flash == NULL) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 6U);
+            response.payload_length = 2U;
+            break;
+        }
+        free(simulator->flash);
+        simulator->flash = new_flash;
+        simulator->flash_size = image_size;
+        simulator->expected_firmware_crc = image_crc;
+        simulator->firmware_chunk_size = chunk_size;
+        simulator->firmware_offset = 0U;
+        simulator->firmware_session_id++;
+        if (simulator->firmware_session_id == 0U) simulator->firmware_session_id = 1U;
+        memcpy(simulator->pending_version, request->payload + 10U, version_length + 1U);
+        simulator->firmware_upgrading = true;
+        simulator->firmware_verified = false;
+        devmgr_put_le32(response.payload, simulator->firmware_session_id);
+        devmgr_put_le32(response.payload + 4U, simulator->firmware_offset);
+        response.payload_length = 8U;
+        break;
+    }
+    case DEVMGR_MSG_FW_DATA: {
+        if (!simulator->firmware_upgrading || request->payload_length <= 8U ||
+            devmgr_get_le32(request->payload) != simulator->firmware_session_id) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 2U);
+            response.payload_length = 2U;
+            break;
+        }
+        uint32_t offset_value = devmgr_get_le32(request->payload + 4U);
+        size_t data_length = request->payload_length - 8U;
+        if (data_length > simulator->firmware_chunk_size || offset_value > simulator->flash_size ||
+            data_length > simulator->flash_size - offset_value) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 5U);
+            response.payload_length = 2U;
+            break;
+        }
+        if (offset_value < simulator->firmware_offset) {
+            if (offset_value + data_length > simulator->firmware_offset ||
+                memcmp(simulator->flash + offset_value, request->payload + 8U, data_length) != 0) {
+                response.type = DEVMGR_MSG_NACK;
+                devmgr_put_le16(response.payload, 5U);
+                response.payload_length = 2U;
+                break;
+            }
+        } else if (offset_value == simulator->firmware_offset) {
+            memcpy(simulator->flash + offset_value, request->payload + 8U, data_length);
+            simulator->firmware_offset += (uint32_t)data_length;
+        } else {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 5U);
+            response.payload_length = 2U;
+            break;
+        }
+        devmgr_put_le32(response.payload, simulator->firmware_offset);
+        response.payload_length = 4U;
+        break;
+    }
+    case DEVMGR_MSG_FW_END:
+        if (!simulator->firmware_upgrading || request->payload_length != 4U ||
+            devmgr_get_le32(request->payload) != simulator->firmware_session_id ||
+            simulator->firmware_offset != simulator->flash_size) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 5U);
+            response.payload_length = 2U;
+        }
+        break;
+    case DEVMGR_MSG_FW_VERIFY: {
+        uint32_t actual_crc = simulator->flash == NULL ? 0U :
+                              devmgr_crc32(simulator->flash, simulator->flash_size);
+        if (!simulator->firmware_upgrading || request->payload_length != 4U ||
+            actual_crc != simulator->expected_firmware_crc) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 7U);
+            response.payload_length = 2U;
+        } else {
+            simulator->firmware_verified = true;
+            devmgr_put_le32(response.payload, actual_crc);
+            response.payload_length = 4U;
+        }
+        break;
+    }
+    case DEVMGR_MSG_FW_ACTIVATE:
+        if (!simulator->firmware_verified) {
+            response.type = DEVMGR_MSG_NACK;
+            devmgr_put_le16(response.payload, 2U);
+            response.payload_length = 2U;
+        } else {
+            memcpy(simulator->firmware_version, simulator->pending_version,
+                   strlen(simulator->pending_version) + 1U);
+        }
+        break;
+    case DEVMGR_MSG_REBOOT:
+        simulator->bootloader_active = false;
+        simulator->firmware_upgrading = false;
+        simulator->firmware_verified = false;
         response.payload_length = 0U;
         break;
     default:
@@ -168,8 +299,18 @@ int simulator_init(struct simulator_state *simulator, int master_fd)
     simulator->temperature_millic = 36500;
     simulator->voltage_mv = 3300U;
     simulator->running = true;
+    memcpy(simulator->firmware_version, "1.0.0", sizeof("1.0.0"));
     (void)clock_gettime(CLOCK_MONOTONIC, &simulator->started_at);
     return devmgr_parser_init(&simulator->parser);
+}
+
+void simulator_cleanup(struct simulator_state *simulator)
+{
+    if (simulator != NULL) {
+        free(simulator->flash);
+        simulator->flash = NULL;
+        simulator->flash_size = 0U;
+    }
 }
 
 int simulator_run(struct simulator_state *simulator)

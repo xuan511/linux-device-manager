@@ -17,6 +17,10 @@ add_executable(test_ipc test_ipc.c)
 target_link_libraries(test_ipc PRIVATE devmgr_ipc)
 add_test(NAME unit.ipc COMMAND test_ipc)
 
+add_executable(test_upgrade test_upgrade.c)
+target_link_libraries(test_upgrade PRIVATE devmgr_upgrade)
+add_test(NAME unit.upgrade COMMAND test_upgrade)
+
 
 if(UNIX AND NOT APPLE)
     add_executable(test_transport test_transport.c)

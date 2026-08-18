@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,12 +134,16 @@ static void print_response(uint8_t command, const struct devmgr_ipc_response *re
                      devmgr_get_le32(response->payload + 4U),
                      devmgr_get_le32(response->payload + 8U),
                      devmgr_get_le32(response->payload + 12U));
+    } else if (command == DEVMGR_IPC_UPGRADE) {
+        (void)printf("Firmware upgrade: verified, activated, rebooted\n");
     }
 }
 
 static void usage(const char *program)
 {
-    (void)fprintf(stderr, "Usage: %s [--socket PATH] ping|info|health|stats|telemetry-start [ms]|telemetry-stop|telemetry\n", program);
+    (void)fprintf(stderr, "Usage: %s [--socket PATH] COMMAND\n"
+                          "Commands: ping, info, health, stats, telemetry-start [ms], "
+                          "telemetry-stop, telemetry, upgrade FILE [VERSION]\n", program);
 }
 
 int main(int argc, char **argv)
@@ -155,9 +160,9 @@ int main(int argc, char **argv)
         if (option == 's') socket_path = optarg;
         else { usage(argv[0]); return option == 'h' ? 0 : 2; }
     }
-    if (optind >= argc || optind + 2 < argc) { usage(argv[0]); return 2; }
+    if (optind >= argc || optind + 3 < argc) { usage(argv[0]); return 2; }
     uint8_t command;
-    uint8_t request_payload[4];
+    uint8_t request_payload[DEVMGR_IPC_MAX_PAYLOAD];
     uint32_t request_payload_length = 0U;
     if (strcmp(argv[optind], "ping") == 0) command = DEVMGR_MSG_PING;
     else if (strcmp(argv[optind], "info") == 0) command = DEVMGR_MSG_GET_INFO;
@@ -175,8 +180,25 @@ int main(int argc, char **argv)
     }
     else if (strcmp(argv[optind], "telemetry-stop") == 0) command = DEVMGR_MSG_STOP_TELEMETRY;
     else if (strcmp(argv[optind], "telemetry") == 0) command = DEVMGR_IPC_GET_TELEMETRY;
+    else if (strcmp(argv[optind], "upgrade") == 0) {
+        char resolved[PATH_MAX];
+        if (optind + 1 >= argc || realpath(argv[optind + 1], resolved) == NULL) {
+            (void)fprintf(stderr, "cannot resolve firmware file\n"); return 2;
+        }
+        const char *version = optind + 2 < argc ? argv[optind + 2] : "1.1.0";
+        size_t path_length = strlen(resolved) + 1U;
+        size_t version_length = strlen(version) + 1U;
+        if (path_length + version_length > sizeof(request_payload)) {
+            (void)fprintf(stderr, "path/version too long\n"); return 2;
+        }
+        memcpy(request_payload, resolved, path_length);
+        memcpy(request_payload + path_length, version, version_length);
+        request_payload_length = (uint32_t)(path_length + version_length);
+        command = DEVMGR_IPC_UPGRADE;
+    }
     else { usage(argv[0]); return 2; }
-    if (optind + 1 < argc && command != DEVMGR_MSG_START_TELEMETRY) { usage(argv[0]); return 2; }
+    if (command != DEVMGR_MSG_START_TELEMETRY && command != DEVMGR_IPC_UPGRADE &&
+        optind + 1 < argc) { usage(argv[0]); return 2; }
     struct timespec before, after;
     struct devmgr_ipc_response response;
     (void)clock_gettime(CLOCK_MONOTONIC, &before);

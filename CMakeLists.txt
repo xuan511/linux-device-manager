@@ -50,6 +50,10 @@ add_library(devmgr_ipc STATIC src/ipc/codec.c)
 target_include_directories(devmgr_ipc PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_ipc PUBLIC devmgr_protocol)
 
+add_library(devmgr_upgrade STATIC src/upgrade/upgrade.c)
+target_include_directories(devmgr_upgrade PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(devmgr_upgrade PUBLIC devmgr_protocol)
+
 if(UNIX AND NOT APPLE)
     add_library(devmgr_transport STATIC)
     target_sources(devmgr_transport PRIVATE
@@ -58,6 +62,9 @@ if(UNIX AND NOT APPLE)
     target_include_directories(devmgr_transport PUBLIC ${PROJECT_SOURCE_DIR}/include)
     target_compile_definitions(devmgr_transport PRIVATE _DEFAULT_SOURCE)
     target_link_libraries(devmgr_transport PUBLIC devmgr_common)
+
+    target_sources(devmgr_upgrade PRIVATE src/upgrade/firmware.c)
+    target_compile_definitions(devmgr_upgrade PRIVATE _GNU_SOURCE)
 
     add_executable(device-sim
         apps/device-sim/main.c
@@ -68,7 +75,7 @@ if(UNIX AND NOT APPLE)
 
     add_executable(devmgrd apps/devmgrd/main.c apps/devmgrd/daemon.c)
     target_include_directories(devmgrd PRIVATE apps/devmgrd)
-    target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport)
+    target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport devmgr_upgrade)
 
     add_executable(devctl apps/devctl/main.c)
     target_link_libraries(devctl PRIVATE devmgr_ipc)
