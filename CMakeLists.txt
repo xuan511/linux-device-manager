@@ -42,6 +42,10 @@ target_sources(devmgr_protocol PRIVATE
 target_include_directories(devmgr_protocol PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_protocol PUBLIC devmgr_common)
 
+add_library(devmgr_device STATIC src/device/session.c)
+target_include_directories(devmgr_device PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(devmgr_device PUBLIC devmgr_protocol)
+
 if(UNIX AND NOT APPLE)
     add_library(devmgr_transport STATIC)
     target_sources(devmgr_transport PRIVATE
