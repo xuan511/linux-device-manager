@@ -9,6 +9,13 @@ never allocates `file_size` bytes or sends the whole image in one frame. Mapping
 and fd are released on success, protocol failure, timeout, signal shutdown, and
 setup failure.
 
+Starting an upgrade returns a daemon operation ID immediately. The CLI polls
+state, result, acknowledged offset, and total size over separate bounded IPC
+connections. There is no operation-wide IPC timeout: individual local exchanges
+have a five-second liveness bound, while device requests retain their own
+two-second deadline/retry policy and recovery cycles. If the CLI exits, the
+daemon continues the operation and its status remains queryable by ID.
+
 ## Transfer Flow
 
 ```mermaid
@@ -46,4 +53,3 @@ lost FW_DATA response safe to retry.
 The simulator models flash in memory, which verifies protocol behavior rather
 than real erase/program timing or power-loss atomicity. STM32 hardware still
 requires physical validation.
-

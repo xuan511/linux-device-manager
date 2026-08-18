@@ -39,11 +39,18 @@ echo "[2/8] Starting devmgrd"
 "${binary_dir}/devmgrd" --device "${pty_path}" --socket "${socket_path}" \
     >"${work_dir}/daemon.out" 2>"${work_dir}/daemon.err" &
 daemon_pid=$!
+ready=0
 for _ in $(seq 1 100); do
-    [[ -S ${socket_path} ]] && "${binary_dir}/devctl" --socket "${socket_path}" ping >/dev/null 2>&1 && break
+    if [[ -S ${socket_path} ]] && "${binary_dir}/devctl" --socket "${socket_path}" ping >/dev/null 2>&1; then ready=1; break; fi
     kill -0 "${daemon_pid}" 2>/dev/null || { cat "${work_dir}/daemon.err" >&2; exit 1; }
+    kill -0 "${sim_pid}" 2>/dev/null || { cat "${work_dir}/sim.err" >&2; exit 1; }
     sleep 0.05
 done
+if (( ready == 0 )); then
+    echo "daemon did not reach READY" >&2
+    cat "${work_dir}/daemon.err" >&2
+    exit 1
+fi
 
 echo "[3/8] Device information"
 "${binary_dir}/devctl" --socket "${socket_path}" info
@@ -68,4 +75,3 @@ wait "${daemon_pid}"
 daemon_pid=
 [[ ! -e ${socket_path} ]]
 echo "PASS"
-

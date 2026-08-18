@@ -24,14 +24,21 @@ pty_path=$(sed -n 's/^PTY: //p' "${work_dir}/sim.out" | head -n1)
 [[ -n ${pty_path} ]]
 "${binary_dir}/devmgrd" --device "${pty_path}" --socket "${socket_path}" >"${work_dir}/daemon.out" 2>"${work_dir}/daemon.err" &
 daemon_pid=$!
+ready=0
 for _ in $(seq 1 100); do
-    [[ -S ${socket_path} ]] && "${binary_dir}/devctl" --socket "${socket_path}" ping >/dev/null 2>&1 && break
+    if [[ -S ${socket_path} ]] && "${binary_dir}/devctl" --socket "${socket_path}" ping >/dev/null 2>&1; then ready=1; break; fi
+    kill -0 "${daemon_pid}" 2>/dev/null || { cat "${work_dir}/daemon.err" >&2; exit 1; }
+    kill -0 "${sim_pid}" 2>/dev/null || { cat "${work_dir}/sim.err" >&2; exit 1; }
     sleep 0.05
 done
+if (( ready == 0 )); then
+    echo "daemon did not reach READY" >&2
+    cat "${work_dir}/daemon.err" >&2
+    exit 1
+fi
 echo "Upgrading with a response blackout at 42% (expect FW_STATUS resume)"
 "${binary_dir}/devctl" --socket "${socket_path}" upgrade "${firmware_path}" 1.2.0
 info_output=$("${binary_dir}/devctl" --socket "${socket_path}" info)
 printf '%s\n' "${info_output}"
 grep -q '^Firmware: 1.2.0$' <<<"${info_output}"
 echo "FAULT RECOVERY PASS"
-

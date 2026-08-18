@@ -3,6 +3,7 @@
 #include "devmgr/error.h"
 #include "devmgr/ipc.h"
 #include "devmgr/protocol.h"
+#include "devmgr/upgrade.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -47,6 +49,12 @@ static int connect_socket(const char *path)
     if (length == 0U || length >= sizeof(address.sun_path)) return -1;
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return -1;
+    struct timeval timeout = {.tv_sec = 5, .tv_usec = 0};
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0 ||
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        (void)close(fd);
+        return -1;
+    }
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
     memcpy(address.sun_path, path, length + 1U);
@@ -134,8 +142,61 @@ static void print_response(uint8_t command, const struct devmgr_ipc_response *re
                      devmgr_get_le32(response->payload + 4U),
                      devmgr_get_le32(response->payload + 8U),
                      devmgr_get_le32(response->payload + 12U));
-    } else if (command == DEVMGR_IPC_UPGRADE) {
-        (void)printf("Firmware upgrade: verified, activated, rebooted\n");
+    } else if (command == DEVMGR_IPC_UPGRADE && response->payload_length == 4U) {
+        (void)printf("Upgrade operation: %u\n", devmgr_get_le32(response->payload));
+    } else if (command == DEVMGR_IPC_UPGRADE_STATUS && response->payload_length == 20U) {
+        enum devmgr_upgrade_state state = (enum devmgr_upgrade_state)response->payload[4];
+        uint32_t offset = devmgr_get_le32(response->payload + 12U);
+        uint32_t total = devmgr_get_le32(response->payload + 16U);
+        (void)printf("Operation: %u\nState: %s\nResult: %s\nProgress: %u/%u\n",
+                     devmgr_get_le32(response->payload), devmgr_upgrade_state_string(state),
+                     devmgr_status_string((int32_t)devmgr_get_le32(response->payload + 8U)),
+                     offset, total);
+    }
+}
+
+static int wait_for_upgrade(const char *socket_path, const struct devmgr_ipc_response *started)
+{
+    if (started->status != DEVMGR_OK || started->payload_length != 4U) return 1;
+    uint8_t operation_payload[4];
+    uint32_t operation_id = devmgr_get_le32(started->payload);
+    enum devmgr_upgrade_state previous_state = DEVMGR_UPGRADE_IDLE;
+    uint32_t previous_offset = UINT32_MAX;
+    devmgr_put_le32(operation_payload, operation_id);
+    for (;;) {
+        struct devmgr_ipc_response status_response;
+        int result = exchange(socket_path, DEVMGR_IPC_UPGRADE_STATUS, operation_payload,
+                              sizeof(operation_payload), &status_response);
+        if (result != DEVMGR_OK || status_response.status != DEVMGR_OK ||
+            status_response.payload_length != 20U ||
+            devmgr_get_le32(status_response.payload) != operation_id) {
+            (void)fprintf(stderr, "upgrade status IPC failed: %s\n",
+                          devmgr_status_string(result != DEVMGR_OK ? result : status_response.status));
+            return 1;
+        }
+        enum devmgr_upgrade_state state =
+            (enum devmgr_upgrade_state)status_response.payload[4];
+        int operation_result = (int32_t)devmgr_get_le32(status_response.payload + 8U);
+        uint32_t offset = devmgr_get_le32(status_response.payload + 12U);
+        uint32_t total = devmgr_get_le32(status_response.payload + 16U);
+        if (state != previous_state || offset != previous_offset) {
+            unsigned percent = total == 0U ? 0U : (unsigned)((uint64_t)offset * 100U / total);
+            (void)printf("Upgrade %-16s %3u%% (%u/%u)\n",
+                         devmgr_upgrade_state_string(state), percent, offset, total);
+            previous_state = state;
+            previous_offset = offset;
+        }
+        if (state == DEVMGR_UPGRADE_COMPLETE) {
+            (void)printf("Firmware upgrade: verified, activated, rebooted\n");
+            return 0;
+        }
+        if (state == DEVMGR_UPGRADE_ERROR) {
+            (void)fprintf(stderr, "firmware upgrade failed: %s\n",
+                          devmgr_status_string(operation_result));
+            return 1;
+        }
+        struct timespec interval = {.tv_sec = 0, .tv_nsec = 100000000L};
+        while (nanosleep(&interval, &interval) < 0 && errno == EINTR) {}
     }
 }
 
@@ -143,7 +204,8 @@ static void usage(const char *program)
 {
     (void)fprintf(stderr, "Usage: %s [--socket PATH] COMMAND\n"
                           "Commands: ping, info, health, stats, telemetry-start [ms], "
-                          "telemetry-stop, telemetry, upgrade FILE [VERSION]\n", program);
+                          "telemetry-stop, telemetry, upgrade FILE [VERSION], "
+                          "upgrade-status ID\n", program);
 }
 
 int main(int argc, char **argv)
@@ -196,8 +258,19 @@ int main(int argc, char **argv)
         request_payload_length = (uint32_t)(path_length + version_length);
         command = DEVMGR_IPC_UPGRADE;
     }
+    else if (strcmp(argv[optind], "upgrade-status") == 0) {
+        char *end = NULL;
+        unsigned long operation = optind + 1 < argc ? strtoul(argv[optind + 1], &end, 10) : 0UL;
+        if (operation == 0UL || operation > UINT32_MAX || end == NULL || *end != '\0') {
+            (void)fprintf(stderr, "invalid operation ID\n"); return 2;
+        }
+        devmgr_put_le32(request_payload, (uint32_t)operation);
+        request_payload_length = 4U;
+        command = DEVMGR_IPC_UPGRADE_STATUS;
+    }
     else { usage(argv[0]); return 2; }
     if (command != DEVMGR_MSG_START_TELEMETRY && command != DEVMGR_IPC_UPGRADE &&
+        command != DEVMGR_IPC_UPGRADE_STATUS &&
         optind + 1 < argc) { usage(argv[0]); return 2; }
     struct timespec before, after;
     struct devmgr_ipc_response response;
@@ -211,5 +284,7 @@ int main(int argc, char **argv)
     if (after.tv_nsec >= before.tv_nsec) elapsed += (uint64_t)(after.tv_nsec - before.tv_nsec);
     else elapsed -= (uint64_t)(before.tv_nsec - after.tv_nsec);
     print_response(command, &response, elapsed);
+    if (command == DEVMGR_IPC_UPGRADE && response.status == DEVMGR_OK)
+        return wait_for_upgrade(socket_path, &response);
     return response.status == DEVMGR_OK ? 0 : 1;
 }

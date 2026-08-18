@@ -8,6 +8,14 @@ accepts any fragmentation/coalescing and discards one byte after invalid header
 or CRC so later valid magic can resynchronize. Payload and IPC lengths are
 bounded before buffering.
 
+For a noncanonical TTY configured with `VMIN=0, VTIME=0`, a drained read may
+return zero even while the PTY master is alive. The daemon treats that as "no
+bytes now"; transport loss comes from EPOLLHUP/EPOLLERR or a real I/O error.
+EPOLLRDHUP is requested only for Unix stream clients, not TTY descriptors. The
+simulator process exclusively owns the PTY master from creation through cleanup,
+and integration harnesses assert both background processes remain alive until
+READY rather than merely waiting for a socket pathname.
+
 ## Timeout, Retry, and Duplication
 
 Requests carry a nonzero sequence and use CLOCK_MONOTONIC deadlines. The session
@@ -46,4 +54,3 @@ other reactor work. Cleanup closes clients, transport, signal/timer/listener/
 epoll fds, unmaps firmware, and unlinks only the configured daemon socket. The
 simulator frees emulated flash. Device reboot keeps the PTY in the simulator;
 real hardware reconnect behavior needs physical validation.
-

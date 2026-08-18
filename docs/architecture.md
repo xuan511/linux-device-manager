@@ -23,6 +23,13 @@ association. Arbitrarily sliced input feeds the stream parser. A matching frame
 completes the pending request and is encoded back to IPC. Device and IPC wire
 formats are separate so local API evolution does not change firmware protocol.
 
+Firmware upgrade is a daemon-owned asynchronous operation. The start request
+returns an operation ID and closes its IPC connection. `devctl` presents a
+synchronous user experience by polling that ID with short status exchanges;
+closing the CLI does not cancel or orphan the device state machine. Device
+request deadlines and FW_STATUS recovery therefore remain independent of any
+single IPC socket lifetime.
+
 ## Event Loop and Thread Model
 
 The daemon runs foreground and uses one epoll reactor. It owns the serial fd,
@@ -48,4 +55,3 @@ Bounded retry exhaustion is returned to the associated client. Transport loss
 currently stops the daemon cleanly; reconnect and persistent upgrade recovery
 are added in Phase 8. SIGTERM exits the loop, closes clients/transport/reactor
 descriptors, and removes the socket path.
-

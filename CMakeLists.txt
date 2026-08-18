@@ -78,7 +78,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(devmgrd PRIVATE devmgr_device devmgr_ipc devmgr_transport devmgr_upgrade)
 
     add_executable(devctl apps/devctl/main.c)
-    target_link_libraries(devctl PRIVATE devmgr_ipc)
+    target_link_libraries(devctl PRIVATE devmgr_ipc devmgr_upgrade)
 endif()
 
 if(DEVMGR_BUILD_TESTS)

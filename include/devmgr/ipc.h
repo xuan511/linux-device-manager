@@ -11,6 +11,7 @@
 #define DEVMGR_IPC_MAX_PAYLOAD 4096U
 #define DEVMGR_IPC_GET_TELEMETRY UINT8_C(0xF0)
 #define DEVMGR_IPC_UPGRADE UINT8_C(0xF1)
+#define DEVMGR_IPC_UPGRADE_STATUS UINT8_C(0xF2)
 
 struct devmgr_ipc_request {
     uint8_t command;
